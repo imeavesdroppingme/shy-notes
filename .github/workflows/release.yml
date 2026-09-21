@@ -50,6 +50,9 @@ jobs:
         uses: actions/setup-node@v5
         with:
           node-version: 24
+          # setup-node@v5 defaults this to true when packageManager is set, and
+          # then fails looking for pnpm before Corepack has installed it.
+          package-manager-cache: false
 
       - name: Enable pnpm via Corepack
         run: |
