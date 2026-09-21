@@ -2,6 +2,8 @@
 
 A floating desktop notepad that gently moves aside when your cursor approaches — unless you aim for its center and capture it to write.
 
+![Shy notes screenshot](docs/screenshot.png)
+
 **Repository:** [github.com/imeavesdroppingme/shy-notes](https://github.com/imeavesdroppingme/shy-notes)
 
 If you like this app, leave a short message at [imeavesdropping.com](https://imeavesdropping.com).
