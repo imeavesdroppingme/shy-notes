@@ -44,16 +44,18 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf xdg-utils
 
-      - uses: pnpm/action-setup@v4
-        with:
-          version: 12
-
+      # Node first, then Corepack pnpm — avoids pnpm/action-setup + setup-node
+      # cache calling `pnpm store path` against a broken workspace file.
       - name: Setup Node
         uses: actions/setup-node@v5
         with:
           node-version: 24
-          # Do not use cache: pnpm here — setup-node runs `pnpm store path` before
-          # install and breaks on this repo's workspace config with older pnpm.
+
+      - name: Enable pnpm via Corepack
+        run: |
+          corepack enable
+          corepack prepare pnpm@12.5.1 --activate
+          pnpm --version
 
       - name: Install Rust stable
         uses: dtolnay/rust-toolchain@stable
