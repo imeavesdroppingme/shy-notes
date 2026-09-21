@@ -1,6 +1,6 @@
-//! Global mouse sampling.
+//! Global mouse sampling and modifier keys.
 
-use device_query::{DeviceQuery, DeviceState};
+use device_query::{DeviceQuery, DeviceState, Keycode};
 use interaction_core::MouseSample;
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -26,5 +26,11 @@ impl MouseTracker {
             x_phys: x as f64,
             y_phys: y as f64,
         }
+    }
+
+    /// True while either Control key is held (suppresses repulsion).
+    pub fn ctrl_held(&self) -> bool {
+        let keys = self.device.get_keys();
+        keys.contains(&Keycode::LControl) || keys.contains(&Keycode::RControl)
     }
 }

@@ -28,6 +28,8 @@ pub struct InteractionController {
     pub layout: DesktopLayout,
     pub visuals: VisualHints,
     pub evasion_enabled: bool,
+    /// When true (e.g. Ctrl held), never flee — capture / pre-capture still work.
+    pub suppress_repulsion: bool,
     last_mouse: Option<MouseSample>,
     pre_capture_since_ms: Option<u64>,
     target_x: f64,
@@ -36,6 +38,8 @@ pub struct InteractionController {
     outside_capture_ticks: u32,
     /// Consecutive non-aim samples while in PreCapture (stickiness).
     miss_aim_ticks: u32,
+    /// After a corner/edge ring swap, suppress further swaps until this time (ms).
+    corner_swap_cooldown_until_ms: u64,
 }
 
 impl InteractionController {
@@ -52,12 +56,14 @@ impl InteractionController {
             layout,
             visuals: VisualHints::default(),
             evasion_enabled: true,
+            suppress_repulsion: false,
             last_mouse: None,
             pre_capture_since_ms: None,
             target_x: pose.x,
             target_y: pose.y,
             outside_capture_ticks: 0,
             miss_aim_ticks: 0,
+            corner_swap_cooldown_until_ms: 0,
         }
     }
 
@@ -234,6 +240,21 @@ impl InteractionController {
             return cmds;
         }
 
+        // Outer fringe: distance falloff would be ~0 — treat as idle so we do not
+        // sit in Repelling with an invisible nudge.
+        let near_dist = (self.params.capture_diameter * 0.5).max(48.0);
+        let span = (influence_outer - near_dist).max(1.0);
+        let proximity = ((influence_outer - dist_center) / span).clamp(0.0, 1.0);
+        if proximity < 0.12 {
+            if self.state != InteractionState::Idle {
+                self.state = InteractionState::Idle;
+            }
+            self.pre_capture_since_ms = None;
+            self.emit_visual(&mut cmds, false, 0.0);
+            self.last_mouse = Some(sample);
+            return cmds;
+        }
+
         let glow = self.approach_glow(dist_center, capture_r);
         let was_precapture = self.state == InteractionState::PreCapture
             || self.pre_capture_since_ms.is_some()
@@ -299,21 +320,32 @@ impl InteractionController {
             return cmds;
         }
 
-        // Case B: not aiming → flee hard, harder when the path clearly misses capture.
+        // Case B: not aiming → flee (unless temporarily suppressed, e.g. Ctrl held).
         self.pre_capture_since_ms = None;
         self.miss_aim_ticks = 0;
         self.state = InteractionState::Repelling;
         self.emit_visual(&mut cmds, false, glow * 0.35);
 
-        let boost = 1.0 + miss * 1.25;
+        if self.suppress_repulsion {
+            self.last_mouse = Some(sample);
+            return cmds;
+        }
+
+        // Mild miss boost — peak force still comes from prefs max_step × falloff.
+        let boost = 1.0 + miss * 0.35;
+        let capture_r = self.params.capture_diameter * 0.5;
+        let near_dist = capture_r.max(48.0);
+        // `repulsion_max_step` is the peak (slider); distance falloff scales it down.
+        let peak = self.params.repulsion_max_step * boost;
         let (ax, ay) = repulsion_delta(
             &self.pose,
             sample.x_phys,
             sample.y_phys,
             vx,
             vy,
-            self.params.repulsion_strength * boost,
-            self.params.repulsion_max_step * boost,
+            peak,
+            influence_outer,
+            near_dist,
         );
 
         let before = self.pose;
@@ -326,11 +358,13 @@ impl InteractionController {
         next = clamp_pose_to_layout(&next, &self.layout);
 
         // If flee would pin us in a corner / against a blocked edge, swap along
-        // the repulsion circumference around the pointer.
+        // the repulsion circumference around the pointer — with cooldown so a
+        // stationary cursor on the switch boundary cannot flip-flop.
         let ring = self.params.influence_radius.max(280.0);
-        next = resolve_flee_pose(
+        let proposed = next;
+        let resolved = resolve_flee_pose(
             &before,
-            &next,
+            &proposed,
             sample.x_phys,
             sample.y_phys,
             ax,
@@ -338,6 +372,19 @@ impl InteractionController {
             &self.layout,
             ring,
         );
+        let swapped = (resolved.x - proposed.x).abs() > 1.0 || (resolved.y - proposed.y).abs() > 1.0;
+        if swapped {
+            if sample.t_ms < self.corner_swap_cooldown_until_ms {
+                // Still in the hysteresis window — keep the clamped flee step.
+                next = proposed;
+            } else {
+                next = resolved;
+                // ~1s at 60Hz; long enough that leaving the cursor still won't oscillate.
+                self.corner_swap_cooldown_until_ms = sample.t_ms.saturating_add(1000);
+            }
+        } else {
+            next = resolved;
+        }
 
         self.target_x = next.x;
         self.target_y = next.y;
@@ -505,6 +552,53 @@ mod tests {
             .iter()
             .all(|c| !matches!(c, InteractionCommand::SetPose { .. })));
         assert_eq!(c.state, InteractionState::Pinned);
+    }
+
+    #[test]
+    fn corner_swap_cooldown_prevents_flip_flop() {
+        let mut pose = WidgetPose {
+            x: 0.0,
+            y: 0.0,
+            w: 200.0,
+            h: 200.0,
+            pinned: false,
+        };
+        let mut c = InteractionController::new(pose, layout(), InteractionParams::default());
+        // Pressure into the top-left corner until a ring swap fires.
+        let mut t = 0u64;
+        let mut swapped_once = false;
+        for _ in 0..90 {
+            t += 16;
+            c.on_mouse(MouseSample {
+                t_ms: t,
+                x_phys: 60.0,
+                y_phys: 60.0,
+            });
+            if c.pose.x > 200.0 || c.pose.y > 200.0 {
+                swapped_once = true;
+                break;
+            }
+        }
+        assert!(swapped_once, "expected an initial corner swap");
+        pose = c.pose;
+        // Hold the pointer still through the cooldown window — must not leap away again.
+        let mut max_jump = 0.0f64;
+        for _ in 0..50 {
+            t += 16;
+            let before = c.pose;
+            c.on_mouse(MouseSample {
+                t_ms: t,
+                x_phys: 60.0,
+                y_phys: 60.0,
+            });
+            let jump = (c.pose.x - before.x).hypot(c.pose.y - before.y);
+            max_jump = max_jump.max(jump);
+        }
+        assert!(
+            max_jump < 120.0,
+            "cooldown should block ring flip-flop (max jump {max_jump}, from {:?})",
+            pose
+        );
     }
 
     #[test]

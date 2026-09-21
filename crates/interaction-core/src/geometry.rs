@@ -109,8 +109,9 @@ pub fn soft_away_from_point(
     pose: &WidgetPose,
     mx: f64,
     my: f64,
-    strength: f64,
     max_step: f64,
+    influence_outer: f64,
+    near_dist: f64,
 ) -> (f64, f64) {
     let (cx, cy) = pose.center();
     let mut dx = cx - mx;
@@ -118,24 +119,32 @@ pub fn soft_away_from_point(
     let dist = (dx * dx + dy * dy).sqrt().max(1.0);
     dx /= dist;
     dy /= dist;
-    // Prefer a decisive jump: use most of max_step immediately.
-    let proximity = ((1.0 / dist) * 240.0 * strength).min(max_step);
-    let push = proximity.max(max_step * 0.55);
-    (dx * push.min(max_step), dy * push.min(max_step))
+
+    // Peak force (`max_step`) at/inside `near_dist`; fades to 0 at `influence_outer`.
+    let span = (influence_outer - near_dist).max(1.0);
+    let linear = ((influence_outer - dist) / span).clamp(0.0, 1.0);
+    // Square falloff: gentle far away, decisive near the capture zone.
+    let t = linear * linear;
+    let push = (max_step * t).clamp(0.0, max_step);
+    (dx * push, dy * push)
 }
 
 /// Flee strictly away from the pointer. Velocity is ignored on purpose: blending
 /// with "-velocity" inverted the flee direction when the cursor approached.
+///
+/// `max_step` is the **peak** displacement per tick (closest approach). Force
+/// scales down as distance grows toward `influence_outer`.
 pub fn repulsion_delta(
     pose: &WidgetPose,
     mx: f64,
     my: f64,
     _vx: f64,
     _vy: f64,
-    strength: f64,
     max_step: f64,
+    influence_outer: f64,
+    near_dist: f64,
 ) -> (f64, f64) {
-    soft_away_from_point(pose, mx, my, strength, max_step)
+    soft_away_from_point(pose, mx, my, max_step, influence_outer, near_dist)
 }
 
 #[allow(clippy::too_many_arguments)]

@@ -1,0 +1,85 @@
+:root {
+  color-scheme: light dark;
+  --bg: #f7f3ea;
+  --ink: #1c1a16;
+  --muted: #6b6458;
+  --line: #d4cdc0;
+  --accent: #2f5d50;
+  --panel: #fffdf8;
+  font-family: "IBM Plex Sans", "Segoe UI", sans-serif;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #171918;
+    --ink: #ece7dc;
+    --muted: #a39b8c;
+    --line: #2f3331;
+    --accent: #7eb9a6;
+    --panel: #1e211f;
+  }
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--ink);
+}
+
+.about {
+  max-width: 360px;
+  margin: 0 auto;
+  padding: 1.25rem 1.3rem 1.4rem;
+}
+
+h1 {
+  font-size: 1.25rem;
+  margin: 0 0 0.65rem;
+}
+
+.tagline {
+  margin: 0 0 0.9rem;
+  font-size: 0.9rem;
+  line-height: 1.45;
+}
+
+p {
+  margin: 0 0 0.65rem;
+  font-size: 0.85rem;
+  line-height: 1.45;
+}
+
+a {
+  color: var(--accent);
+}
+
+.hint {
+  color: var(--muted);
+  font-size: 0.8rem;
+}
+
+.license {
+  margin-top: 1rem;
+  font-size: 0.72rem;
+  color: var(--muted);
+}
+
+footer {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 1.1rem;
+}
+
+button {
+  border: 1px solid var(--line);
+  background: var(--accent);
+  color: #fff;
+  border-radius: 5px;
+  padding: 0.4rem 0.85rem;
+  cursor: pointer;
+  font: inherit;
+}

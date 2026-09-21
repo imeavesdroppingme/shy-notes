@@ -22,8 +22,8 @@ impl Default for InteractionParams {
             look_ahead_px: 150.0,
             still_speed_threshold: 12.0,
             repulsion_strength: 2.6,
-            // Decisive per-tick jump when fleeing a clear miss.
-            repulsion_max_step: 320.0,
+            // Peak per-tick jump at closest approach (distance falloff scales it down).
+            repulsion_max_step: 187.0,
             animation_lerp: 1.0,
         }
     }

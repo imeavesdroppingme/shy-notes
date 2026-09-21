@@ -1,0 +1,103 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Shy notes — Settings</title>
+    <link rel="stylesheet" href="/src/settings.css" />
+  </head>
+  <body>
+    <main class="settings">
+      <h1>Settings</h1>
+
+      <section>
+        <h2>Evasion</h2>
+        <label>
+          <span>Max repulsion strength</span>
+          <input id="repulsion-strength" type="range" min="0.5" max="5" step="0.1" />
+          <output id="repulsion-strength-out"></output>
+        </label>
+        <label>
+          <span>Repulsion diameter (px)</span>
+          <input id="influence-radius" type="range" min="120" max="2000" step="20" />
+          <output id="influence-radius-out"></output>
+        </label>
+        <label>
+          <span>Capture area diameter (px)</span>
+          <input id="capture-diameter" type="range" min="40" max="280" step="5" />
+          <output id="capture-diameter-out"></output>
+        </label>
+        <label class="check">
+          <input id="show-glow" type="checkbox" checked />
+          <span>Show capture glow</span>
+        </label>
+        <p class="hint">
+          Strength is the peak push near the capture zone; it fades as the cursor
+          moves farther away. Hold <kbd>Ctrl</kbd> to temporarily suppress repulsion.
+        </p>
+      </section>
+
+      <section>
+        <h2>Editor</h2>
+        <label class="check">
+          <input id="show-line-numbers" type="checkbox" />
+          <span>Show line numbers</span>
+        </label>
+        <label class="check">
+          <input id="use-monospace" type="checkbox" />
+          <span>Monospace font</span>
+        </label>
+      </section>
+
+      <section>
+        <h2>App</h2>
+        <label class="check">
+          <input id="open-at-startup" type="checkbox" />
+          <span>Open at startup</span>
+        </label>
+        <p class="hint">Keep Shy notes in the tray; the window close button hides the note.</p>
+      </section>
+
+      <section>
+        <h2>Note</h2>
+        <label>
+          <span>Title (optional)</span>
+          <input id="note-title" type="text" maxlength="120" placeholder="Untitled" />
+        </label>
+        <label>
+          <span>Background color</span>
+          <div class="color-row">
+            <input id="note-bg" type="color" value="#f3efe6" />
+            <div id="bg-swatch" class="bg-swatch" title="#f3efe6" aria-hidden="true"></div>
+            <span id="bg-label" class="bg-label">#f3efe6</span>
+            <button id="bg-reset" type="button" class="ghost">Use theme default</button>
+          </div>
+        </label>
+        <label>
+          <span>Foreground color</span>
+          <div class="color-row">
+            <input id="note-fg" type="color" value="#1c1a16" />
+            <div id="fg-swatch" class="bg-swatch" title="#1c1a16" aria-hidden="true"></div>
+            <span id="fg-label" class="bg-label">#1c1a16</span>
+            <button id="fg-reset" type="button" class="ghost">Use theme default</button>
+          </div>
+        </label>
+        <label>
+          <span>Font size</span>
+          <input id="note-font-size" type="range" min="10" max="28" step="1" />
+          <output id="note-font-size-out"></output>
+        </label>
+        <dl class="meta">
+          <div><dt>Created</dt><dd id="meta-created">—</dd></div>
+          <div><dt>Modified</dt><dd id="meta-updated">—</dd></div>
+          <div><dt>ID</dt><dd id="meta-id" class="mono">—</dd></div>
+        </dl>
+      </section>
+
+      <footer>
+        <button id="save" type="button">Save</button>
+      </footer>
+    </main>
+    <script type="module" src="/src/settings.ts"></script>
+  </body>
+</html>

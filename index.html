@@ -3,20 +3,64 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>shy-notes</title>
+    <title>Shy notes</title>
     <link rel="stylesheet" href="/src/styles.css" />
   </head>
   <body>
     <div id="app" class="app">
       <header class="chrome" data-tauri-drag-region>
-        <span class="brand" data-tauri-drag-region>shy-notes</span>
+        <div class="chrome-title">
+          <span class="brand" data-tauri-drag-region>Shy notes</span>
+          <div class="note-combo" id="note-combo">
+            <button
+              id="note-combo-trigger"
+              class="note-combo-trigger"
+              type="button"
+              aria-haspopup="listbox"
+              aria-expanded="false"
+              aria-label="Active note"
+            >
+              <span id="note-combo-swatch" class="note-combo-swatch" aria-hidden="true"></span>
+              <span id="note-combo-label" class="note-combo-label">Untitled note</span>
+              <span class="note-combo-caret" aria-hidden="true">▾</span>
+            </button>
+            <div id="note-combo-list" class="note-combo-list hidden" role="listbox"></div>
+          </div>
+        </div>
         <div class="chrome-actions">
-          <button id="pin-btn" class="icon-btn" type="button" title="Pin / Unpin" aria-pressed="false">○</button>
-          <button id="close-btn" class="icon-btn close-btn" type="button" title="Quit shy-notes" aria-label="Close">×</button>
+          <div class="menu-wrap">
+            <button id="menu-btn" class="icon-btn" type="button" title="Menu" aria-label="Menu" aria-haspopup="menu" aria-expanded="false">
+              <svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true">
+                <path fill="currentColor" d="M4 7h16v2H4V7zm0 4h16v2H4v-2zm0 4h16v2H4v-2z"/>
+              </svg>
+            </button>
+            <div id="app-menu" class="app-menu hidden" role="menu">
+              <button type="button" role="menuitem" data-action="new-note">New note</button>
+              <button type="button" role="menuitem" data-action="settings">Settings…</button>
+              <button type="button" role="menuitem" data-action="about">About…</button>
+              <button type="button" role="menuitem" data-action="pin">Pin / Unpin</button>
+              <button type="button" role="menuitem" data-action="reset">Reset position</button>
+              <hr />
+              <button id="visibility-menu-item" type="button" role="menuitem" data-action="toggle-visibility">Hide</button>
+              <button type="button" role="menuitem" data-action="quit">Quit</button>
+            </div>
+          </div>
+          <button id="settings-btn" class="icon-btn" type="button" title="Settings" aria-label="Settings">
+            <svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true">
+              <path fill="currentColor" d="M19.14 12.94c.04-.31.06-.63.06-.94s-.02-.63-.06-.94l2.03-1.58a.5.5 0 0 0 .12-.64l-1.92-3.32a.5.5 0 0 0-.6-.22l-2.39.96a7.1 7.1 0 0 0-1.63-.94l-.36-2.54a.5.5 0 0 0-.5-.42h-3.84a.5.5 0 0 0-.5.42l-.36 2.54c-.59.24-1.13.55-1.63.94l-2.39-.96a.5.5 0 0 0-.6.22L2.77 8.84a.5.5 0 0 0 .12.64l2.03 1.58c-.04.31-.06.63-.06.94s.02.63.06.94l-2.03 1.58a.5.5 0 0 0-.12.64l1.92 3.32c.14.24.43.34.68.22l2.39-.96c.5.39 1.04.7 1.63.94l.36 2.54c.05.24.26.42.5.42h3.84c.24 0 .45-.18.5-.42l.36-2.54c.59-.24 1.13-.55 1.63-.94l2.39.96c.25.12.54.02.68-.22l1.92-3.32a.5.5 0 0 0-.12-.64l-2.03-1.58zM12 15.6A3.6 3.6 0 1 1 12 8.4a3.6 3.6 0 0 1 0 7.2z"/>
+            </svg>
+          </button>
+          <button id="pin-btn" class="icon-btn" type="button" title="Pin / Unpin" aria-pressed="false" aria-label="Pin">
+            <svg class="pin-icon" viewBox="0 0 24 24" width="14" height="14" aria-hidden="true">
+              <path fill="currentColor" d="M12 2c2.4 0 4.4 1.8 4.7 4.1L17 7v1.2c0 1.6-.7 3-1.9 4L14 13.5V20l-2 2-2-2v-6.5L8.9 12.2A5.1 5.1 0 0 1 7 8.2V7l.3-.9C7.6 3.8 9.6 2 12 2zm0 2c-1.4 0-2.5 1-2.7 2.3L9 7v1.2c0 .9.4 1.7 1.1 2.3l.9.7V19l1 .9 1-.9v-7.8l.9-.7c.7-.6 1.1-1.4 1.1-2.3V7l-.3-.7C14.5 5 13.4 4 12 4z"/>
+            </svg>
+          </button>
+          <button id="close-btn" class="icon-btn close-btn" type="button" title="Hide to tray" aria-label="Hide">×</button>
         </div>
       </header>
       <div class="editor-wrap">
         <div id="capture-glow" class="capture-glow" aria-hidden="true"></div>
+        <div id="line-gutter" class="line-gutter hidden" aria-hidden="true"></div>
         <textarea
           id="editor"
           class="editor"
@@ -28,8 +72,8 @@
       <div id="a11y" class="a11y hidden" role="dialog" aria-labelledby="a11y-title">
         <p id="a11y-title"><strong>Accessibility permission needed</strong></p>
         <p>
-          shy-notes needs Accessibility access to track the cursor and gently move aside.
-          Open System Settings, enable shy-notes, then return here.
+          Shy notes needs Accessibility access to track the cursor and gently move aside.
+          Open System Settings, enable Shy notes, then return here.
         </p>
         <div class="a11y-actions">
           <button id="a11y-open" type="button">Open System Settings</button>
