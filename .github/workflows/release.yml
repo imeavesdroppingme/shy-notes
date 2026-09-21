@@ -46,13 +46,14 @@ jobs:
 
       - uses: pnpm/action-setup@v4
         with:
-          version: 9
+          version: 12
 
       - name: Setup Node
         uses: actions/setup-node@v5
         with:
           node-version: 24
-          cache: pnpm
+          # Do not use cache: pnpm here — setup-node runs `pnpm store path` before
+          # install and breaks on this repo's workspace config with older pnpm.
 
       - name: Install Rust stable
         uses: dtolnay/rust-toolchain@stable
