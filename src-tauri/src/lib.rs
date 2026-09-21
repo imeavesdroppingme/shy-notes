@@ -387,6 +387,25 @@ fn open_about_window(app: &AppHandle) -> Result<(), String> {
     Ok(())
 }
 
+/// Windows deadlocks if a secondary WebView is created on the UI/command thread.
+fn spawn_open_settings(app: &AppHandle) {
+    let app = app.clone();
+    tauri::async_runtime::spawn(async move {
+        if let Err(e) = open_settings_window(&app) {
+            debug_log(format!("open_settings failed: {e}"));
+        }
+    });
+}
+
+fn spawn_open_about(app: &AppHandle) {
+    let app = app.clone();
+    tauri::async_runtime::spawn(async move {
+        if let Err(e) = open_about_window(&app) {
+            debug_log(format!("open_about failed: {e}"));
+        }
+    });
+}
+
 /// True when Settings or About is visible — note should stay put.
 fn overlay_blocks_repulsion(app: &AppHandle) -> bool {
     for label in ["settings", "about"] {
@@ -673,12 +692,13 @@ fn hide_settings_window(app: AppHandle) -> Result<(), String> {
 }
 
 #[tauri::command]
-fn open_settings(app: AppHandle) -> Result<(), String> {
+async fn open_settings(app: AppHandle) -> Result<(), String> {
+    // Must be async on Windows — sync WebviewWindowBuilder::build deadlocks WebView2.
     open_settings_window(&app)
 }
 
 #[tauri::command]
-fn open_about(app: AppHandle) -> Result<(), String> {
+async fn open_about(app: AppHandle) -> Result<(), String> {
     open_about_window(&app)
 }
 
@@ -996,10 +1016,10 @@ pub fn run() {
                     toggle_visibility(&handle_menu, &state_menu, &menus_menu);
                 }
                 "settings" | "app-settings" => {
-                    let _ = open_settings_window(app);
+                    spawn_open_settings(app);
                 }
                 "about" | "app-about" => {
-                    let _ = open_about_window(app);
+                    spawn_open_about(app);
                 }
                 "reset" | "app-reset" => reset_position(&handle_menu, &state_menu),
                 "quit" => {

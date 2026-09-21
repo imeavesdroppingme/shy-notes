@@ -477,7 +477,7 @@ async function init() {
     void invoke("hide_window");
   });
 
-  document.querySelector(".chrome")?.addEventListener("mousedown", async (ev) => {
+  document.querySelector(".chrome")?.addEventListener("mousedown", (ev) => {
     const target = ev.target as HTMLElement | null;
     if (
       target?.closest("button") ||
@@ -487,12 +487,15 @@ async function init() {
       return;
     }
     closeMenu();
-    await invoke("begin_drag");
-    try {
-      await win.startDragging();
-    } finally {
-      await invoke("end_drag");
-    }
+    // Do not await before startDragging — on Windows the mouse capture is lost
+    // after the first await and title-bar drag never starts (esp. when pinned).
+    void invoke("begin_drag");
+    void win
+      .startDragging()
+      .catch((err) => console.warn("[shy-notes] startDragging failed", err))
+      .finally(() => {
+        void invoke("end_drag");
+      });
   });
 
   await listen<{ preCapture: boolean; glow: number }>("visual-hints", (ev) => {
