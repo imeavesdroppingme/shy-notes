@@ -58,6 +58,8 @@ Unsigned local builds:
 pnpm tauri build
 ```
 
+Cross-platform CI builds (macOS / Windows / Linux `.deb`) via GitHub Actions — see [docs/packaging.md](docs/packaging.md). Trigger **Actions → Release**, or push a `v*` tag; assets land on a **draft** GitHub Release.
+
 Code signing and Apple notarization are deferred until release credentials are available.
 
 ## License

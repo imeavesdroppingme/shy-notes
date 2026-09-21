@@ -1,0 +1,86 @@
+# Build unsigned shy-notes bundles for macOS, Windows, and Linux,
+# then attach them to a draft GitHub Release.
+#
+# Triggers:
+#   - Manual: Actions → "Release" → Run workflow
+#   - Tag:   git tag v0.1.0 && git push origin v0.1.0
+#
+# First run: repo Settings → Actions → General → Workflow permissions
+# → allow "Read and write permissions" (needed to create the release).
+
+name: Release
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - "v*"
+
+jobs:
+  publish-tauri:
+    permissions:
+      contents: write
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: macos-latest
+            args: --target aarch64-apple-darwin
+          - platform: macos-latest
+            args: --target x86_64-apple-darwin
+          - platform: ubuntu-22.04
+            args: ""
+          - platform: windows-latest
+            args: ""
+
+    runs-on: ${{ matrix.platform }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Linux dependencies
+        if: matrix.platform == 'ubuntu-22.04'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf xdg-utils
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: lts/*
+          cache: pnpm
+
+      - name: Install Rust stable
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.platform == 'macos-latest' && 'aarch64-apple-darwin,x86_64-apple-darwin' || '' }}
+
+      - name: Rust cache
+        uses: swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri -> target
+
+      - name: Install frontend dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build and upload release assets
+        uses: tauri-apps/tauri-action@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tauriScript: pnpm tauri
+          args: ${{ matrix.args }}
+          tagName: v__VERSION__
+          releaseName: Shy notes v__VERSION__
+          releaseBody: |
+            Unsigned builds for testing.
+
+            - **macOS**: open with right-click → Open, or run `xattr -dr com.apple.quarantine` on the `.app`
+            - **Windows**: SmartScreen may warn (unknown publisher)
+            - **Linux**: prefer the `.deb` on X11; Wayland is best-effort
+          releaseDraft: true
+          prerelease: false
