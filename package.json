@@ -20,8 +20,5 @@
     "@tauri-apps/cli": "^2",
     "typescript": "~5.8.3",
     "vite": "^6.0.3"
-  },
-  "pnpm": {
-    "onlyBuiltDependencies": ["esbuild"]
   }
 }
