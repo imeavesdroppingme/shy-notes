@@ -1,0 +1,136 @@
+:root {
+  color-scheme: light dark;
+  --bg: #f3efe6;
+  --ink: #1c1a16;
+  --muted: #6b6458;
+  --line: #d4cdc0;
+  --accent: #2f5d50;
+  --chrome: #ebe4d7;
+  font-family: "IBM Plex Sans", "Segoe UI", sans-serif;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #1a1c1b;
+    --ink: #ece7dc;
+    --muted: #a39b8c;
+    --line: #2f3331;
+    --accent: #7eb9a6;
+    --chrome: #222624;
+  }
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  height: 100%;
+  overflow: hidden;
+  background: var(--bg);
+  color: var(--ink);
+}
+
+.app {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  border: 1px solid var(--line);
+  transition: transform 160ms ease, box-shadow 160ms ease, border-color 160ms ease;
+}
+
+.app.pre-capture {
+  transform: scale(1.02);
+  border-color: var(--accent);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--accent) 40%, transparent);
+}
+
+.chrome {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  padding: 0.35rem 0.5rem;
+  background: var(--chrome);
+  border-bottom: 1px solid var(--line);
+  user-select: none;
+  cursor: grab;
+}
+
+.brand {
+  font-size: 0.75rem;
+  letter-spacing: 0.04em;
+  text-transform: lowercase;
+  color: var(--muted);
+  font-weight: 600;
+}
+
+.icon-btn {
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--ink);
+  border-radius: 4px;
+  width: 1.6rem;
+  height: 1.6rem;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.icon-btn[aria-pressed="true"] {
+  color: var(--accent);
+  border-color: var(--accent);
+}
+
+.editor {
+  flex: 1;
+  width: 100%;
+  border: 0;
+  resize: none;
+  padding: 0.65rem 0.75rem;
+  background: transparent;
+  color: var(--ink);
+  font: 0.95rem/1.45 "IBM Plex Sans", "Segoe UI", sans-serif;
+  outline: none;
+}
+
+.a11y {
+  position: absolute;
+  inset: auto 0.6rem 0.6rem 0.6rem;
+  padding: 0.75rem;
+  background: var(--chrome);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  font-size: 0.8rem;
+  color: var(--ink);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.18);
+}
+
+.a11y p {
+  margin: 0 0 0.5rem;
+}
+
+.a11y-actions {
+  display: flex;
+  gap: 0.4rem;
+  flex-wrap: wrap;
+}
+
+.a11y button {
+  border: 1px solid var(--line);
+  background: var(--bg);
+  color: var(--ink);
+  border-radius: 4px;
+  padding: 0.3rem 0.55rem;
+  cursor: pointer;
+  font: inherit;
+}
+
+.a11y button.ghost {
+  background: transparent;
+}
+
+.hidden {
+  display: none !important;
+}

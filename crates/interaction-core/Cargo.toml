@@ -1,0 +1,10 @@
+[package]
+name = "interaction-core"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Pure geometric evasion and capture logic for shy-notes"
+
+[dependencies]
+
+[dev-dependencies]

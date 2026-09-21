@@ -1,0 +1,34 @@
+---
+description: shy-notes MVP scope, architecture, and phase gates
+alwaysApply: true
+---
+
+# shy-notes project rules
+
+## Product
+
+Floating always-on-top notepad that softly flees the cursor unless the user aims at the capture surface. Display name: `shy-notes`. Local-first; no accounts, network, telemetry, cloud sync, markdown, or multi-note in MVP.
+
+## Stack
+
+Tauri 2 + Rust + TypeScript (vanilla). Pure evasion logic lives in `crates/interaction-core` (no Tauri). Native adapter in `src-tauri`. Frontend only renders editor/feedback.
+
+## Hard constraints
+
+- English for all repo artifacts.
+- No Cursor Cloud Agents / paid remote compute.
+- Linux: X11 supported; Wayland best-effort (document limits; no fragile compositor hacks).
+- Signing/notarization deferred; ship unsigned until Phase 8 credentials unlock.
+- Default hotkey: Cmd+Shift+Space (macOS) / Ctrl+Shift+Space (Win/Linux).
+
+## Architecture
+
+Keep `interaction-core` free of I/O and window APIs. Physical pixels in the core; DPI conversion only in the native adapter. Prefer “do not move” when intent is ambiguous.
+
+## Out of scope (MVP)
+
+Rich text, AI, plugins, cloud, settings window, multiple notes, database.
+
+## Process
+
+Advance one phase at a time with a runnable app and documented gate. Do not accumulate unverified evasion features.
