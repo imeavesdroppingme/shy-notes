@@ -120,7 +120,6 @@ fn apply_autostart(app: &AppHandle, enabled: bool) {
 struct AppInner {
     controller: InteractionController,
     snapshot: AppStateSnapshot,
-    mouse: MouseTracker,
     permission_prompted: bool,
     /// Own hide tracking — macOS `is_visible` after `hide()` is unreliable for tray restore.
     main_concealed: bool,
@@ -821,7 +820,6 @@ pub fn run() {
     let shared: SharedState = Arc::new(Mutex::new(AppInner {
         controller,
         snapshot,
-        mouse: MouseTracker::new(),
         permission_prompted: false,
         main_concealed: false,
     }));
@@ -1073,6 +1071,8 @@ pub fn run() {
             let loop_state = shared_for_setup.clone();
             let loop_handle = handle.clone();
             std::thread::spawn(move || {
+                // Keep DeviceState off SharedState: on Linux it is !Send (Rc/X11).
+                let mouse = MouseTracker::new();
                 loop {
                     std::thread::sleep(Duration::from_millis(16));
                     let Some(window) = loop_handle.get_webview_window("main") else {
@@ -1102,6 +1102,10 @@ pub fn run() {
                         _ => None,
                     };
                     let block_repulsion = overlay_blocks_repulsion(&loop_handle);
+                    let ctrl = mouse.ctrl_held();
+                    let mut sample = mouse.sample();
+                    sample.x_phys *= scale;
+                    sample.y_phys *= scale;
                     let (cmds, show_glow) = {
                         let mut inner = loop_state.lock();
                         inner.controller.set_layout(layout);
@@ -1113,11 +1117,7 @@ pub fn run() {
                                 size.height as f64,
                             );
                         }
-                        inner.controller.suppress_repulsion =
-                            inner.mouse.ctrl_held() || block_repulsion;
-                        let mut sample = inner.mouse.sample();
-                        sample.x_phys *= scale;
-                        sample.y_phys *= scale;
+                        inner.controller.suppress_repulsion = ctrl || block_repulsion;
                         let show_glow = inner.snapshot.prefs.show_glow;
                         (inner.controller.on_mouse(sample), show_glow)
                     };
