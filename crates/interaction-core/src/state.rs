@@ -1,7 +1,8 @@
 //! Explicit interaction state machine.
 
 use crate::geometry::{
-    capture_center, clamp_pose_to_layout, point_in_circle, ray_hits_circle, repulsion_delta,
+    aims_at_capture, capture_center, capture_miss_factor, clamp_pose_to_layout, point_in_circle,
+    repulsion_delta, resolve_flee_pose,
 };
 use crate::params::InteractionParams;
 use crate::types::{
@@ -33,6 +34,8 @@ pub struct InteractionController {
     target_y: f64,
     /// Consecutive samples with the pointer outside the widget while Captured.
     outside_capture_ticks: u32,
+    /// Consecutive non-aim samples while in PreCapture (stickiness).
+    miss_aim_ticks: u32,
 }
 
 impl InteractionController {
@@ -54,6 +57,7 @@ impl InteractionController {
             target_x: pose.x,
             target_y: pose.y,
             outside_capture_ticks: 0,
+            miss_aim_ticks: 0,
         }
     }
 
@@ -92,6 +96,7 @@ impl InteractionController {
         self.visuals.pre_capture = false;
         self.pre_capture_since_ms = None;
         self.outside_capture_ticks = 0;
+        self.miss_aim_ticks = 0;
     }
 
     pub fn end_drag(&mut self, x: f64, y: f64) {
@@ -113,6 +118,31 @@ impl InteractionController {
         self.pose = clamp_pose_to_layout(&self.pose, &self.layout);
     }
 
+    fn emit_visual(
+        &mut self,
+        cmds: &mut Vec<InteractionCommand>,
+        pre_capture: bool,
+        glow: f32,
+    ) {
+        let glow = glow.clamp(0.0, 1.0);
+        if self.visuals.pre_capture == pre_capture && (self.visuals.glow - glow).abs() < 0.02 {
+            return;
+        }
+        self.visuals.pre_capture = pre_capture;
+        self.visuals.glow = glow;
+        cmds.push(InteractionCommand::SetVisual {
+            pre_capture,
+            glow,
+        });
+    }
+
+    fn approach_glow(&self, dist_center: f64, capture_r: f64) -> f32 {
+        let outer = self.params.influence_radius + self.pose.w.max(self.pose.h) * 0.5;
+        let edge = (dist_center - capture_r).max(0.0);
+        let span = (outer - capture_r).max(1.0);
+        (1.0 - (edge / span) as f32).clamp(0.0, 1.0)
+    }
+
     /// Drive one tick from a mouse sample. Returns commands for the native adapter.
     pub fn on_mouse(&mut self, sample: MouseSample) -> Vec<InteractionCommand> {
         let mut cmds = Vec::new();
@@ -126,7 +156,6 @@ impl InteractionController {
             self.state = InteractionState::Pinned;
             let (cx, cy) = capture_center(&self.pose);
             let r = self.params.capture_diameter * 0.5;
-            // Capture-for-editing still works while pinned; focus once when entering the surface.
             let inside = point_in_circle(sample.x_phys, sample.y_phys, cx, cy, r);
             let was_inside = self
                 .last_mouse
@@ -135,6 +164,7 @@ impl InteractionController {
             if inside && !was_inside {
                 cmds.push(InteractionCommand::RequestFocus);
             }
+            self.emit_visual(&mut cmds, false, 0.0);
             self.last_mouse = Some(sample);
             return cmds;
         }
@@ -144,7 +174,7 @@ impl InteractionController {
             return cmds;
         }
 
-        let (vx, vy, speed) = match self.last_mouse {
+        let (vx, vy, _speed) = match self.last_mouse {
             Some(prev) if sample.t_ms > prev.t_ms => {
                 let dt = (sample.t_ms - prev.t_ms) as f64 / 1000.0;
                 let vx = (sample.x_phys - prev.x_phys) / dt.max(0.001);
@@ -158,6 +188,8 @@ impl InteractionController {
         let (cx, cy) = capture_center(&self.pose);
         let capture_r = self.params.capture_diameter * 0.5;
         let dist_center = (sample.x_phys - cx).hypot(sample.y_phys - cy);
+        let influence_outer =
+            self.params.influence_radius + self.pose.w.max(self.pose.h) * 0.5;
 
         // Leave capture only after sustained exit (avoids DPI/jitter dropping edit mode).
         if self.state == InteractionState::Captured {
@@ -170,16 +202,10 @@ impl InteractionController {
                 self.outside_capture_ticks = 0;
             } else {
                 self.outside_capture_ticks = self.outside_capture_ticks.saturating_add(1);
-                // ~300ms at 60Hz — pointer must clearly leave before releasing edit mode.
                 if self.outside_capture_ticks >= 18 {
                     self.state = InteractionState::Idle;
                     self.outside_capture_ticks = 0;
-                    if self.visuals.pre_capture {
-                        self.visuals.pre_capture = false;
-                        cmds.push(InteractionCommand::SetVisual {
-                            pre_capture: false,
-                        });
-                    }
+                    self.emit_visual(&mut cmds, false, 0.0);
                 }
             }
             self.last_mouse = Some(sample);
@@ -191,101 +217,106 @@ impl InteractionController {
             self.state = InteractionState::Captured;
             self.outside_capture_ticks = 0;
             self.pre_capture_since_ms = None;
-            if self.visuals.pre_capture {
-                self.visuals.pre_capture = false;
-                cmds.push(InteractionCommand::SetVisual {
-                    pre_capture: false,
-                });
-            }
+            self.emit_visual(&mut cmds, false, 0.0);
             cmds.push(InteractionCommand::RequestFocus);
             self.last_mouse = Some(sample);
             return cmds;
         }
 
         // Outside influence: idle.
-        if dist_center > self.params.influence_radius + (self.pose.w.max(self.pose.h) * 0.5) {
+        if dist_center > influence_outer {
             if self.state != InteractionState::Idle {
                 self.state = InteractionState::Idle;
             }
-            if self.visuals.pre_capture {
-                self.visuals.pre_capture = false;
-                self.pre_capture_since_ms = None;
-                cmds.push(InteractionCommand::SetVisual {
-                    pre_capture: false,
-                });
-            }
+            self.pre_capture_since_ms = None;
+            self.emit_visual(&mut cmds, false, 0.0);
             self.last_mouse = Some(sample);
             return cmds;
         }
 
+        let glow = self.approach_glow(dist_center, capture_r);
+        let was_precapture = self.state == InteractionState::PreCapture
+            || self.pre_capture_since_ms.is_some()
+            || self.visuals.pre_capture;
         self.state = InteractionState::Evaluating;
 
-        // Ambiguous / nearly still → do not move.
-        if speed < self.params.still_speed_threshold {
-            if self.visuals.pre_capture {
-                // Keep pre-capture if already aiming, else clear.
-            } else {
-                self.state = InteractionState::Idle;
-            }
+        // Need at least one prior sample before fleeing — otherwise the first
+        // frame of an approach can't detect aim yet and would wrongly push away.
+        if self.last_mouse.is_none() {
+            self.emit_visual(&mut cmds, false, glow * 0.5);
             self.last_mouse = Some(sample);
             return cmds;
         }
 
-        let mag = speed.max(1.0);
-        let dx = vx / mag;
-        let dy = vy / mag;
-        // Look far enough to reach the capture surface when aiming at it.
-        let reach = dist_center + capture_r + self.params.look_ahead_px;
-        let aims_capture = ray_hits_circle(
+        // Aim toward capture: generous cone + enlarged ray. Sticky once engaged,
+        // but a clear miss cancels stickiness immediately.
+        let aim_min_speed = (self.params.still_speed_threshold * 0.35).max(4.0);
+        let raw_aims = aims_at_capture(
             sample.x_phys,
             sample.y_phys,
-            dx,
-            dy,
-            reach,
+            vx,
+            vy,
             cx,
             cy,
             capture_r,
+            self.params.look_ahead_px,
+            aim_min_speed,
         );
+        let miss = capture_miss_factor(
+            sample.x_phys,
+            sample.y_phys,
+            vx,
+            vy,
+            cx,
+            cy,
+            capture_r,
+            aim_min_speed,
+        );
+        let clear_miss = miss >= 0.55;
+
+        let aims_capture = if raw_aims {
+            self.miss_aim_ticks = 0;
+            true
+        } else if was_precapture && !clear_miss {
+            self.miss_aim_ticks = self.miss_aim_ticks.saturating_add(1);
+            self.miss_aim_ticks < 8
+        } else {
+            self.miss_aim_ticks = 0;
+            false
+        };
 
         if aims_capture {
-            // Case A: pre-capture then hold still.
             if self.pre_capture_since_ms.is_none() {
                 self.pre_capture_since_ms = Some(sample.t_ms);
             }
             self.state = InteractionState::PreCapture;
-            if !self.visuals.pre_capture
-                && sample.t_ms.saturating_sub(self.pre_capture_since_ms.unwrap_or(sample.t_ms))
-                    >= self.params.pre_capture_delay_ms / 4
-            {
-                self.visuals.pre_capture = true;
-                cmds.push(InteractionCommand::SetVisual {
-                    pre_capture: true,
-                });
-            }
+            let ready = sample
+                .t_ms
+                .saturating_sub(self.pre_capture_since_ms.unwrap_or(sample.t_ms))
+                >= self.params.pre_capture_delay_ms / 4;
+            self.emit_visual(&mut cmds, ready, glow.max(0.45));
             self.last_mouse = Some(sample);
             return cmds;
         }
 
-        // Case B: repel.
+        // Case B: not aiming → flee hard, harder when the path clearly misses capture.
         self.pre_capture_since_ms = None;
-        if self.visuals.pre_capture {
-            self.visuals.pre_capture = false;
-            cmds.push(InteractionCommand::SetVisual {
-                pre_capture: false,
-            });
-        }
+        self.miss_aim_ticks = 0;
         self.state = InteractionState::Repelling;
+        self.emit_visual(&mut cmds, false, glow * 0.35);
 
+        let boost = 1.0 + miss * 1.25;
         let (ax, ay) = repulsion_delta(
             &self.pose,
             sample.x_phys,
             sample.y_phys,
             vx,
             vy,
-            self.params.repulsion_strength,
-            self.params.repulsion_max_step,
+            self.params.repulsion_strength * boost,
+            self.params.repulsion_max_step * boost,
         );
 
+        let before = self.pose;
         self.target_x += ax;
         self.target_y += ay;
 
@@ -293,6 +324,21 @@ impl InteractionController {
         next.x += (self.target_x - self.pose.x) * self.params.animation_lerp;
         next.y += (self.target_y - self.pose.y) * self.params.animation_lerp;
         next = clamp_pose_to_layout(&next, &self.layout);
+
+        // If flee would pin us in a corner / against a blocked edge, swap along
+        // the repulsion circumference around the pointer.
+        let ring = self.params.influence_radius.max(280.0);
+        next = resolve_flee_pose(
+            &before,
+            &next,
+            sample.x_phys,
+            sample.y_phys,
+            ax,
+            ay,
+            &self.layout,
+            ring,
+        );
+
         self.target_x = next.x;
         self.target_y = next.y;
 
@@ -339,21 +385,44 @@ mod tests {
     }
 
     #[test]
-    fn still_mouse_does_not_flee() {
+    fn still_mouse_in_influence_flees_away() {
         let mut c = InteractionController::new(pose_center(), layout(), InteractionParams::default());
-        let s0 = MouseSample {
+        let start_x = c.pose.x;
+        // Nearly still, left of center → must push right (away), never left (toward).
+        c.on_mouse(MouseSample {
             t_ms: 0,
             x_phys: 700.0,
             y_phys: 540.0,
-        };
-        let s1 = MouseSample {
+        });
+        let cmds = c.on_mouse(MouseSample {
             t_ms: 16,
             x_phys: 700.05,
             y_phys: 540.0,
-        };
-        c.on_mouse(s0);
-        let cmds = c.on_mouse(s1);
-        assert!(cmds.iter().all(|c| !matches!(c, InteractionCommand::SetPose { .. })));
+        });
+        assert!(
+            cmds.iter()
+                .any(|c| matches!(c, InteractionCommand::SetPose { .. })),
+            "inside influence without aiming should flee"
+        );
+        assert!(c.pose.x > start_x, "must flee away from pointer on the left");
+    }
+
+    #[test]
+    fn approaching_from_right_flees_left() {
+        let mut c = InteractionController::new(pose_center(), layout(), InteractionParams::default());
+        let start_x = c.pose.x;
+        // Glancing above while approaching from the right — not aimed at capture.
+        c.on_mouse(MouseSample {
+            t_ms: 0,
+            x_phys: 1200.0,
+            y_phys: 300.0,
+        });
+        c.on_mouse(MouseSample {
+            t_ms: 16,
+            x_phys: 1120.0,
+            y_phys: 300.0,
+        });
+        assert!(c.pose.x < start_x, "must flee left when pointer is on the right");
     }
 
     #[test]

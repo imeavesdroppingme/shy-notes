@@ -10,15 +10,21 @@
     <div id="app" class="app">
       <header class="chrome" data-tauri-drag-region>
         <span class="brand" data-tauri-drag-region>shy-notes</span>
-        <button id="pin-btn" class="icon-btn" type="button" title="Pin / Unpin" aria-pressed="false">○</button>
+        <div class="chrome-actions">
+          <button id="pin-btn" class="icon-btn" type="button" title="Pin / Unpin" aria-pressed="false">○</button>
+          <button id="close-btn" class="icon-btn close-btn" type="button" title="Quit shy-notes" aria-label="Close">×</button>
+        </div>
       </header>
-      <textarea
-        id="editor"
-        class="editor"
-        spellcheck="true"
-        placeholder="Write freely…"
-        aria-label="Note"
-      ></textarea>
+      <div class="editor-wrap">
+        <div id="capture-glow" class="capture-glow" aria-hidden="true"></div>
+        <textarea
+          id="editor"
+          class="editor"
+          spellcheck="true"
+          placeholder="Write freely…"
+          aria-label="Note"
+        ></textarea>
+      </div>
       <div id="a11y" class="a11y hidden" role="dialog" aria-labelledby="a11y-title">
         <p id="a11y-title"><strong>Accessibility permission needed</strong></p>
         <p>

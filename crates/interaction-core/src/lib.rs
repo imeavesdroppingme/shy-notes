@@ -6,8 +6,9 @@ mod state;
 mod types;
 
 pub use geometry::{
-    capture_center, clamp_pose_to_layout, point_in_circle, ray_hits_circle, rect_contains_rect,
-    repulsion_delta, soft_away_from_point,
+    aims_at_capture, capture_center, capture_miss_factor, clamp_pose_to_layout, is_pose_in_corner,
+    point_in_circle, ray_hits_circle, rect_contains_rect, repulsion_delta, resolve_flee_pose,
+    soft_away_from_point, swap_along_repulsion_ring,
 };
 pub use params::InteractionParams;
 pub use state::{InteractionController, InteractionState};

@@ -16,13 +16,15 @@ impl Default for InteractionParams {
     fn default() -> Self {
         Self {
             capture_diameter: 100.0,
-            influence_radius: 250.0,
+            // Large influence so a flee crosses most of the display.
+            influence_radius: 900.0,
             pre_capture_delay_ms: 400,
             look_ahead_px: 150.0,
             still_speed_threshold: 12.0,
-            repulsion_strength: 0.85,
-            repulsion_max_step: 28.0,
-            animation_lerp: 0.35,
+            repulsion_strength: 2.6,
+            // Decisive per-tick jump when fleeing a clear miss.
+            repulsion_max_step: 320.0,
+            animation_lerp: 1.0,
         }
     }
 }

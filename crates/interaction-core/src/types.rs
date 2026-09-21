@@ -77,16 +77,18 @@ impl WidgetPose {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
 pub struct VisualHints {
     pub pre_capture: bool,
+    /// 0 = hidden, 1 = strongest capture-surface glow.
+    pub glow: f32,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum InteractionCommand {
     Noop,
     SetPose { x: f64, y: f64 },
-    SetVisual { pre_capture: bool },
+    SetVisual { pre_capture: bool, glow: f32 },
     RequestFocus,
     SuppressRepulsion,
 }

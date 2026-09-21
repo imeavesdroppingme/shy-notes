@@ -141,7 +141,7 @@ fn e2e_glancing_pass_makes_widget_flee_then_stay_visible() {
 }
 
 #[test]
-fn e2e_near_still_mouse_does_not_teleport() {
+fn e2e_near_still_mouse_flees_when_not_aiming() {
     let mut c = InteractionController::new(widget_at(860.0, 440.0), single_monitor(), InteractionParams::default());
     let start = (c.pose.x, c.pose.y);
 
@@ -156,9 +156,10 @@ fn e2e_near_still_mouse_does_not_teleport() {
     );
 
     assert!(
-        (c.pose.x - start.0).abs() < 0.5 && (c.pose.y - start.1).abs() < 0.5,
-        "ambiguous/still motion must prefer staying put"
+        (c.pose.x - start.0).hypot(c.pose.y - start.1) > 0.5,
+        "inside influence without aiming at capture should flee"
     );
+    assert!(c.pose.x > start.0, "flee away from pointer on the left");
 }
 
 #[test]
@@ -289,16 +290,17 @@ fn e2e_write_interrupt_write_session() {
     );
     assert!((c.pose.x - before.0).hypot(c.pose.y - before.1) > 0.5);
 
-    // 4) Return deliberately to the (possibly moved) capture center.
+    // 4) Return deliberately to the current capture center.
     let (cx2, cy2) = capture_center(&c.pose);
-    let cmds = drive(
+    drive(
         &mut c,
         &[
             (100, cx2 - 200.0, cy2),
             (116, cx2 - 100.0, cy2),
-            (132, cx2, cy2),
         ],
     );
+    let (cx3, cy3) = capture_center(&c.pose);
+    let cmds = drive(&mut c, &[(132, cx3, cy3)]);
     assert_eq!(c.state, InteractionState::Captured);
     assert!(cmds
         .iter()

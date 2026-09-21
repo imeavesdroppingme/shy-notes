@@ -12,7 +12,9 @@ type Snapshot = {
 const appEl = () => document.getElementById("app")!;
 const editor = () => document.getElementById("editor") as HTMLTextAreaElement;
 const pinBtn = () => document.getElementById("pin-btn") as HTMLButtonElement;
+const closeBtn = () => document.getElementById("close-btn") as HTMLButtonElement;
 const a11y = () => document.getElementById("a11y")!;
+const glowEl = () => document.getElementById("capture-glow")!;
 
 let saveTimer: number | undefined;
 let pinned = false;
@@ -23,6 +25,14 @@ function setPinnedUi(value: boolean) {
   btn.setAttribute("aria-pressed", value ? "true" : "false");
   btn.textContent = value ? "●" : "○";
   btn.title = value ? "Unpin" : "Pin";
+}
+
+function setGlow(intensity: number, preCapture: boolean) {
+  const el = glowEl();
+  const glow = Math.max(0, Math.min(1, intensity));
+  el.style.setProperty("--glow-intensity", String(glow));
+  el.classList.toggle("visible", glow > 0.02);
+  appEl().classList.toggle("pre-capture", preCapture);
 }
 
 function scheduleSave() {
@@ -49,8 +59,13 @@ async function init() {
     setPinnedUi(next);
   });
 
-  // Manual window drag via chrome — notify core so repulsion stays suppressed.
-  document.querySelector(".chrome")?.addEventListener("mousedown", async () => {
+  closeBtn().addEventListener("click", () => {
+    void invoke("quit_app");
+  });
+
+  document.querySelector(".chrome")?.addEventListener("mousedown", async (ev) => {
+    const target = ev.target as HTMLElement | null;
+    if (target?.closest("button")) return;
     await invoke("begin_drag");
     try {
       await win.startDragging();
@@ -59,11 +74,8 @@ async function init() {
     }
   });
 
-  // Size/position stay owned by the Rust loop in physical pixels.
-  // Do not push logical webview sizes — that breaks capture hit-testing on Retina.
-
-  await listen<{ preCapture: boolean }>("visual-hints", (ev) => {
-    appEl().classList.toggle("pre-capture", !!ev.payload.preCapture);
+  await listen<{ preCapture: boolean; glow: number }>("visual-hints", (ev) => {
+    setGlow(ev.payload.glow ?? 0, !!ev.payload.preCapture);
   });
 
   await listen("request-focus", () => {

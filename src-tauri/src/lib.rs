@@ -80,8 +80,11 @@ fn apply_commands(window: &WebviewWindow, app: &AppHandle, cmds: &[InteractionCo
             InteractionCommand::SetPose { x, y } => {
                 let _ = window.set_position(PhysicalPosition::new(*x as i32, *y as i32));
             }
-            InteractionCommand::SetVisual { pre_capture } => {
-                let _ = app.emit("visual-hints", serde_json::json!({ "preCapture": pre_capture }));
+            InteractionCommand::SetVisual { pre_capture, glow } => {
+                let _ = app.emit(
+                    "visual-hints",
+                    serde_json::json!({ "preCapture": pre_capture, "glow": glow }),
+                );
             }
             InteractionCommand::RequestFocus => {
                 // Focus once; avoid re-focus storms that interrupt typing.
@@ -194,6 +197,15 @@ fn open_accessibility_settings() {
     permissions::open_accessibility_settings();
 }
 
+#[tauri::command]
+fn quit_app(app: AppHandle, state: tauri::State<'_, SharedState>) {
+    {
+        let inner = state.lock();
+        persist_from_controller(&inner);
+    }
+    app.exit(0);
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     let snapshot = persist::load_state();
@@ -227,6 +239,7 @@ pub fn run() {
             notify_resized,
             check_accessibility,
             open_accessibility_settings,
+            quit_app,
         ])
         .setup(move |app| {
             let handle = app.handle().clone();
