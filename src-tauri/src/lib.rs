@@ -1191,8 +1191,24 @@ pub fn run() {
             std::thread::spawn(move || {
                 // Keep DeviceState off SharedState: on Linux it is !Send (Rc/X11).
                 let mouse = MouseTracker::new();
+                let mut tick: u64 = 0;
+                #[cfg(target_os = "linux")]
+                {
+                    let wayland = std::env::var_os("WAYLAND_DISPLAY").is_some()
+                        && std::env::var("XDG_SESSION_TYPE")
+                            .map(|s| s.eq_ignore_ascii_case("wayland"))
+                            .unwrap_or(false);
+                    if wayland {
+                        debug_log(
+                            "Linux Wayland session detected: global mouse polling is unreliable; use an X11 session for evasion",
+                        );
+                    } else {
+                        debug_log("Linux mouse loop starting (X11 expected)");
+                    }
+                }
                 loop {
                     std::thread::sleep(Duration::from_millis(16));
+                    tick = tick.wrapping_add(1);
                     let Some(window) = loop_handle.get_webview_window("main") else {
                         continue;
                     };
@@ -1214,7 +1230,6 @@ pub fn run() {
                     // while calling into AppKit/Win32 deadlocks when a UI command waits
                     // on the same lock (pin, settings, save).
                     let layout = build_layout(&window);
-                    let scale = window.scale_factor().unwrap_or(1.0);
                     let outer = match (window.outer_position(), window.outer_size()) {
                         (Ok(pos), Ok(size)) => Some((pos, size)),
                         _ => None,
@@ -1222,8 +1237,28 @@ pub fn run() {
                     let block_repulsion = overlay_blocks_repulsion(&loop_handle);
                     let ctrl = mouse.ctrl_held();
                     let mut sample = mouse.sample();
-                    sample.x_phys *= scale;
-                    sample.y_phys *= scale;
+                    // device_query on macOS is in points; core uses physical pixels.
+                    // On Windows/Linux the coords already match PhysicalPosition space —
+                    // multiplying by scale_factor breaks flee/glow (esp. HiDPI Linux).
+                    #[cfg(target_os = "macos")]
+                    {
+                        let scale = window.scale_factor().unwrap_or(1.0);
+                        sample.x_phys *= scale;
+                        sample.y_phys *= scale;
+                    }
+                    if tick % 60 == 1 {
+                        if let Some((pos, size)) = &outer {
+                            debug_log(format!(
+                                "mouse=({:.0},{:.0}) win=({},{};{}x{}) ctrl={ctrl} block={block_repulsion}",
+                                sample.x_phys,
+                                sample.y_phys,
+                                pos.x,
+                                pos.y,
+                                size.width,
+                                size.height
+                            ));
+                        }
+                    }
                     let (cmds, show_glow) = {
                         let mut inner = loop_state.lock();
                         inner.controller.set_layout(layout);
