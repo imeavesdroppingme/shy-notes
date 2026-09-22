@@ -773,6 +773,22 @@ fn hide_settings_window(app: AppHandle) -> Result<(), String> {
 struct AppInfo {
     version: String,
     build_date: String,
+    /// True on a Linux Wayland session — evasion needs global mouse + free move (X11).
+    linux_wayland: bool,
+}
+
+fn is_linux_wayland() -> bool {
+    #[cfg(target_os = "linux")]
+    {
+        std::env::var_os("WAYLAND_DISPLAY").is_some()
+            && std::env::var("XDG_SESSION_TYPE")
+                .map(|s| s.eq_ignore_ascii_case("wayland"))
+                .unwrap_or(false)
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        false
+    }
 }
 
 #[tauri::command]
@@ -780,6 +796,7 @@ fn get_app_info() -> AppInfo {
     AppInfo {
         version: format!("v{}", env!("CARGO_PKG_VERSION")),
         build_date: env!("SHY_NOTES_BUILD_DATE").to_string(),
+        linux_wayland: is_linux_wayland(),
     }
 }
 
@@ -990,7 +1007,12 @@ pub fn run() {
             let window = app
                 .get_webview_window("main")
                 .expect("main window missing");
-            let _ = window.set_title("Shy notes");
+            let title = if is_linux_wayland() {
+                "Shy notes — Wayland: evasion limited"
+            } else {
+                "Shy notes"
+            };
+            let _ = window.set_title(title);
 
             {
                 let mut inner = shared_for_setup.lock();
@@ -1194,11 +1216,7 @@ pub fn run() {
                 let mut tick: u64 = 0;
                 #[cfg(target_os = "linux")]
                 {
-                    let wayland = std::env::var_os("WAYLAND_DISPLAY").is_some()
-                        && std::env::var("XDG_SESSION_TYPE")
-                            .map(|s| s.eq_ignore_ascii_case("wayland"))
-                            .unwrap_or(false);
-                    if wayland {
+                    if is_linux_wayland() {
                         debug_log(
                             "Linux Wayland session detected: global mouse polling is unreliable; use an X11 session for evasion",
                         );

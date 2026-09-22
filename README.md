@@ -48,7 +48,14 @@ This runs unit tests, e2e cursor-session replays (`crates/interaction-core/tests
 
 ## Linux notes
 
-X11 is the supported path. Wayland is best-effort due to compositor limits on global mouse polling and arbitrary window positioning.
+**Use an X11 session for evasion.** Cursor flee and capture glow need global mouse position and free window placement; Wayland compositors do not expose those to apps.
+
+| Session | Evasion | Rest of the app |
+| --- | --- | --- |
+| **X11** (supported) | Works | Works |
+| **Wayland** (best-effort) | Broken / stuck glow | Editor, tray, settings, notes OK |
+
+On Debian / KDE Plasma: at the login screen (SDDM), open the session menu and choose **Plasma (X11)** instead of **Plasma (Wayland)**. On Wayland the window title and Settings show a short warning.
 
 ## Packaging
 

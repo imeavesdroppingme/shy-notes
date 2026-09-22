@@ -5,6 +5,7 @@ import { getCurrentWindow } from "@tauri-apps/api/window";
 type AppInfo = {
   version: string;
   build_date: string;
+  linux_wayland: boolean;
 };
 
 const openExternal = (url: string) => (ev: Event) => {
@@ -29,6 +30,9 @@ void (async () => {
   try {
     const info = await invoke<AppInfo>("get_app_info");
     meta.textContent = `${info.version} · built ${info.build_date}`;
+    if (info.linux_wayland) {
+      document.getElementById("wayland-notice")?.classList.remove("hidden");
+    }
   } catch (err) {
     console.warn("[shy-notes] get_app_info failed", err);
     meta.textContent = "Version unknown";

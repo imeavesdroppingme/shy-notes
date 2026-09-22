@@ -47,6 +47,20 @@ h1 {
   color: var(--muted);
 }
 
+.hidden {
+  display: none !important;
+}
+
+.platform-notice {
+  margin: 0 0 0.85rem;
+  padding: 0.55rem 0.7rem;
+  font-size: 0.8rem;
+  line-height: 1.4;
+  background: color-mix(in srgb, #c47a2c 18%, var(--panel));
+  border: 1px solid color-mix(in srgb, #c47a2c 45%, var(--line));
+  border-radius: 8px;
+}
+
 .tagline {
   margin: 0 0 0.9rem;
   font-size: 0.9rem;

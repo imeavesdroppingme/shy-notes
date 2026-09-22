@@ -153,9 +153,23 @@ function bindColorField(
   return input;
 }
 
+type AppInfo = {
+  version: string;
+  build_date: string;
+  linux_wayland: boolean;
+};
+
 async function init() {
   const prefs = await invoke<UserPrefs>("get_prefs");
   const note = await invoke<NoteMeta>("get_note_meta");
+  try {
+    const info = await invoke<AppInfo>("get_app_info");
+    if (info.linux_wayland) {
+      $("wayland-notice").classList.remove("hidden");
+    }
+  } catch (err) {
+    console.warn("[shy-notes] get_app_info failed", err);
+  }
 
   const strength = bindRange("repulsion-strength", "repulsion-strength-out", formatMaxStrength);
   const influence = bindRange("influence-radius", "influence-radius-out", (v) => `${Math.round(v)} px`);

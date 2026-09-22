@@ -15,4 +15,4 @@ Wayland restricts arbitrary global window positioning and reliable global mouse 
 
 ## Consequences
 
-Linux CI and docs must state X11 as the validated target. Wayland users may see reduced evasive behavior.
+Linux CI and docs must state X11 as the validated target. Wayland users may see reduced evasive behavior. The app surfaces a Linux-only Wayland warning (window title, Settings, About) when the session is detected as Wayland.

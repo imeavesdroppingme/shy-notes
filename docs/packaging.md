@@ -56,4 +56,4 @@ xattr -dr com.apple.quarantine /path/to/Shy\ notes.app
 
 ## Linux
 
-Prefer validating on **X11**. Wayland is best-effort; global mouse / free positioning may be limited by the compositor.
+Validate evasion on **X11**. Wayland sessions cannot provide reliable global mouse polling or free window moves, so flee/glow will not work; the packaged app shows an in-app warning when it detects Wayland.

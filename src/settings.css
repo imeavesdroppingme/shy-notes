@@ -41,6 +41,21 @@ h1 {
   margin: 0 0 1rem;
 }
 
+.hidden {
+  display: none !important;
+}
+
+.platform-notice {
+  margin: 0 0 0.85rem;
+  padding: 0.65rem 0.75rem;
+  font-size: 0.82rem;
+  line-height: 1.4;
+  color: var(--ink);
+  background: color-mix(in srgb, #c47a2c 18%, var(--panel));
+  border: 1px solid color-mix(in srgb, #c47a2c 45%, var(--line));
+  border-radius: 8px;
+}
+
 h2 {
   font-size: 0.78rem;
   text-transform: uppercase;
