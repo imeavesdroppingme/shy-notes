@@ -12,6 +12,7 @@ If you like this app, leave a short message at [imeavesdropping.com](https://ime
 
 - Always-on-top undecorated window with plain-text editor
 - Soft evasive repulsion based on cursor trajectory (hold **Ctrl** to suppress)
+- Drop text or plain-text files into the note (hold **Ctrl** or pin to approach while dragging)
 - Clickless capture via a central capture surface + optional glow
 - Pin / unpin, settings window, tray menu
 - Multiple local notes with selector, optional title, background/foreground colors, font size

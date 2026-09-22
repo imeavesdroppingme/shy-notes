@@ -142,6 +142,8 @@ struct AppInner {
     permission_prompted: bool,
     /// Own hide tracking — macOS `is_visible` after `hide()` is unreliable for tray restore.
     main_concealed: bool,
+    /// File/text drag is over the main window — keep the note still for drop.
+    drop_hover: bool,
 }
 
 type SharedState = Arc<Mutex<AppInner>>;
@@ -494,6 +496,16 @@ fn overlay_blocks_repulsion(app: &AppHandle) -> bool {
         }
     }
     false
+}
+
+#[tauri::command]
+fn set_drop_hover(active: bool, state: tauri::State<'_, SharedState>) {
+    state.lock().drop_hover = active;
+}
+
+#[tauri::command]
+fn frontend_log(message: String) {
+    debug_log(format!("ui: {message}"));
 }
 
 fn position_beside_note(app: &AppHandle, window: &WebviewWindow) {
@@ -951,6 +963,7 @@ pub fn run() {
         snapshot,
         permission_prompted: false,
         main_concealed: false,
+        drop_hover: false,
     }));
 
     let shared_for_setup = shared.clone();
@@ -996,6 +1009,8 @@ pub fn run() {
             list_notes,
             switch_note,
             create_note,
+            set_drop_hover,
+            frontend_log,
         ])
         .setup(move |app| {
             let handle = app.handle().clone();
@@ -1288,7 +1303,8 @@ pub fn run() {
                                 size.height as f64,
                             );
                         }
-                        inner.controller.suppress_repulsion = ctrl || block_repulsion;
+                        inner.controller.suppress_repulsion =
+                            ctrl || block_repulsion || inner.drop_hover;
                         let show_glow = inner.snapshot.prefs.show_glow;
                         (inner.controller.on_mouse(sample), show_glow)
                     };

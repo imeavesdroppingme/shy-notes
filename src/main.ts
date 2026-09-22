@@ -294,6 +294,148 @@ function flushSave() {
   void invoke("save_text", { text: editor().value });
 }
 
+const MAX_DROP_BYTES = 2 * 1024 * 1024;
+const TEXT_FILE_RE =
+  /\.(txt|md|markdown|csv|tsv|log|json|rs|ts|tsx|js|jsx|css|html|xml|yml|yaml|toml|ini|cfg|conf|sh|py|go|c|h|cpp|hpp|java|kt|swift|rb|php|sql|env|gitignore)$/i;
+
+function insertAtCursor(text: string) {
+  const el = editor();
+  const start = el.selectionStart;
+  const end = el.selectionEnd;
+  el.value = el.value.slice(0, start) + text + el.value.slice(end);
+  const caret = start + text.length;
+  el.setSelectionRange(caret, caret);
+  el.focus();
+  scheduleSave();
+}
+
+function looksLikeText(bytes: Uint8Array): boolean {
+  const n = Math.min(bytes.length, 8192);
+  let suspicious = 0;
+  for (let i = 0; i < n; i++) {
+    const b = bytes[i];
+    if (b === 0) return false;
+    if (b < 7 || (b > 13 && b < 32)) suspicious++;
+  }
+  return suspicious / Math.max(n, 1) < 0.05;
+}
+
+async function readDroppedFile(file: File): Promise<string | null> {
+  if (file.size > MAX_DROP_BYTES) {
+    console.warn("[shy-notes] drop skipped (too large):", file.name);
+    return null;
+  }
+  const typeOk =
+    !file.type ||
+    file.type.startsWith("text/") ||
+    file.type === "application/json" ||
+    file.type === "application/xml" ||
+    file.type === "application/javascript";
+  const nameOk = TEXT_FILE_RE.test(file.name);
+  if (!typeOk && !nameOk) {
+    console.warn("[shy-notes] drop skipped (not text):", file.name, file.type);
+    return null;
+  }
+  const buf = new Uint8Array(await file.arrayBuffer());
+  if (!looksLikeText(buf)) {
+    console.warn("[shy-notes] drop skipped (binary):", file.name);
+    return null;
+  }
+  return new TextDecoder("utf-8", { fatal: false }).decode(buf);
+}
+
+async function textFromDataTransfer(dt: DataTransfer): Promise<string | null> {
+  const files = Array.from(dt.files ?? []);
+  if (files.length > 0) {
+    const parts: string[] = [];
+    for (const file of files) {
+      const body = await readDroppedFile(file);
+      if (body == null) continue;
+      parts.push(files.length > 1 ? `--- ${file.name} ---\n${body}` : body);
+    }
+    return parts.length ? parts.join("\n\n") : null;
+  }
+  const plain = dt.getData("text/plain");
+  if (plain) return plain;
+  const html = dt.getData("text/html");
+  if (html) {
+    const tmp = document.createElement("div");
+    tmp.innerHTML = html;
+    const text = tmp.textContent ?? "";
+    return text || null;
+  }
+  return null;
+}
+
+function wireDragAndDrop() {
+  const root = appEl();
+  let depth = 0;
+  const uiLog = (msg: string) => {
+    void invoke("frontend_log", { message: msg }).catch(() => {});
+  };
+  const setHover = (on: boolean) => {
+    root.classList.toggle("drop-target", on);
+    void invoke("set_drop_hover", { active: on }).catch((err) =>
+      console.warn("[shy-notes] set_drop_hover failed", err),
+    );
+  };
+  const clearHover = () => {
+    depth = 0;
+    setHover(false);
+  };
+
+  // Capture on window so dragover preventDefault always runs — otherwise macOS
+  // never delivers drop (Tauri native DnD must stay disabled: dragDropEnabled false).
+  const allowDrop = (ev: DragEvent) => {
+    ev.preventDefault();
+    ev.stopPropagation();
+    if (ev.dataTransfer) ev.dataTransfer.dropEffect = "copy";
+  };
+
+  window.addEventListener("dragenter", (ev) => {
+    allowDrop(ev);
+    depth += 1;
+    if (depth === 1) {
+      setHover(true);
+      uiLog("dragenter");
+    }
+  });
+  window.addEventListener("dragover", allowDrop);
+  window.addEventListener("dragleave", (ev) => {
+    ev.preventDefault();
+    depth = Math.max(0, depth - 1);
+    if (depth === 0) {
+      setHover(false);
+      uiLog("dragleave");
+    }
+  });
+  window.addEventListener("drop", (ev) => {
+    allowDrop(ev);
+    clearHover();
+    const dt = ev.dataTransfer;
+    if (!dt) {
+      uiLog("drop without dataTransfer");
+      return;
+    }
+    const types = Array.from(dt.types ?? []);
+    uiLog(`drop types=[${types.join(",")}] files=${dt.files?.length ?? 0}`);
+    void textFromDataTransfer(dt)
+      .then((text) => {
+        if (text == null || text === "") {
+          uiLog("drop produced empty text");
+          return;
+        }
+        uiLog(`drop insert chars=${text.length}`);
+        insertAtCursor(text);
+      })
+      .catch((err) => {
+        console.warn("[shy-notes] drop failed", err);
+        uiLog(`drop failed: ${String(err)}`);
+      });
+  });
+  window.addEventListener("blur", clearHover);
+}
+
 function setMenuOpen(open: boolean) {
   appMenu().classList.toggle("hidden", !open);
   menuBtn().setAttribute("aria-expanded", open ? "true" : "false");
@@ -378,6 +520,8 @@ async function init() {
   applyPrefs(snap.prefs);
 
   const win = getCurrentWindow();
+
+  wireDragAndDrop();
 
   editor().addEventListener("input", scheduleSave);
   editor().addEventListener("blur", flushSave);

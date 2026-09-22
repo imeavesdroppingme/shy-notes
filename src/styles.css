@@ -297,6 +297,12 @@ body {
   display: flex;
 }
 
+.app.drop-target .editor-wrap {
+  outline: 2px dashed color-mix(in srgb, var(--accent) 70%, transparent);
+  outline-offset: -6px;
+  border-radius: 6px;
+}
+
 .capture-glow {
   pointer-events: none;
   position: absolute;
