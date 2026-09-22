@@ -73,6 +73,10 @@ jobs:
       - name: Install frontend dependencies
         run: pnpm install --frozen-lockfile
 
+      - name: Stamp build date (UTC)
+        shell: bash
+        run: echo "SHY_NOTES_BUILD_DATE=$(date -u +%Y-%m-%d)" >> "$GITHUB_ENV"
+
       - name: Build and upload release assets
         uses: tauri-apps/tauri-action@v1
         env:

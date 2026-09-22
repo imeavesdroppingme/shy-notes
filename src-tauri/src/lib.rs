@@ -769,6 +769,20 @@ fn hide_settings_window(app: AppHandle) -> Result<(), String> {
     Ok(())
 }
 
+#[derive(Debug, Clone, Serialize)]
+struct AppInfo {
+    version: String,
+    build_date: String,
+}
+
+#[tauri::command]
+fn get_app_info() -> AppInfo {
+    AppInfo {
+        version: format!("v{}", env!("CARGO_PKG_VERSION")),
+        build_date: env!("SHY_NOTES_BUILD_DATE").to_string(),
+    }
+}
+
 #[tauri::command]
 async fn open_settings(app: AppHandle) -> Result<(), String> {
     // Must be async on Windows — sync WebviewWindowBuilder::build deadlocks WebView2.
@@ -951,6 +965,7 @@ pub fn run() {
             toggle_window_visibility,
             open_settings,
             open_about,
+            get_app_info,
             hide_settings_window,
             save_settings,
             get_prefs,
