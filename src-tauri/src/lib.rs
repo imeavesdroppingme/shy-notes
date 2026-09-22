@@ -25,9 +25,28 @@ use tauri_plugin_autostart::MacosLauncher;
 use tauri_plugin_global_shortcut::{Code, GlobalShortcutExt, Modifiers, Shortcut, ShortcutState};
 
 fn debug_log(msg: impl AsRef<str>) {
+    let text = msg.as_ref();
+    let stamp = chrono::Local::now().format("%Y-%m-%d %H:%M:%S%.3f");
+    let line = format!("[{stamp}] {text}");
     if std::env::var_os("SHY_NOTES_DEBUG").is_some() {
-        eprintln!("[shy-notes] {}", msg.as_ref());
+        eprintln!("[shy-notes] {text}");
     }
+    if let Some(path) = log_file_path() {
+        use std::io::Write;
+        if let Ok(mut f) = std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(path)
+        {
+            let _ = writeln!(f, "{line}");
+        }
+    }
+}
+
+fn log_file_path() -> Option<std::path::PathBuf> {
+    let dir = dirs::data_local_dir()?.join("com.imeavesdropping.shy-notes");
+    std::fs::create_dir_all(&dir).ok()?;
+    Some(dir.join("shy-notes.log"))
 }
 
 struct VisibilityMenus {
@@ -269,7 +288,11 @@ fn hide_main_window(app: &AppHandle, state: &SharedState, menus: &MenuHandle) {
     debug_log("hide_main_window");
     if let Some(window) = app.get_webview_window("main") {
         let _ = window.set_always_on_top(false);
-        let _ = window.hide();
+        if let Err(e) = window.hide() {
+            debug_log(format!("hide_main_window hide() error: {e}"));
+        }
+    } else {
+        debug_log("hide_main_window: main window missing");
     }
 }
 
@@ -334,31 +357,29 @@ fn open_settings_window(app: &AppHandle) -> Result<(), String> {
     let _gate = GATE.lock();
 
     if let Some(existing) = app.get_webview_window("settings") {
+        debug_log("open_settings: reuse existing window");
         let was_visible = existing.is_visible().unwrap_or(false);
         let _ = existing.set_always_on_top(true);
         position_beside_note(app, &existing);
         let _ = existing.unminimize();
         let _ = existing.show();
         let _ = existing.set_focus();
-        // Refresh form after a prior Save→hide (or prefs changed while closed).
         if !was_visible {
             let _ = existing.eval("window.location.reload()");
         }
         return Ok(());
     }
-    let settings = WebviewWindowBuilder::new(app, "settings", WebviewUrl::App("settings.html".into()))
-        .title("Shy notes — Settings")
-        .inner_size(440.0, 560.0)
-        .min_inner_size(360.0, 420.0)
-        .resizable(true)
-        .always_on_top(true)
-        .visible(false)
-        .build()
-        .map_err(|e| e.to_string())?;
-    position_beside_note(app, &settings);
-    let _ = settings.show();
-    let _ = settings.set_focus();
-    Ok(())
+
+    debug_log("open_settings: creating window");
+    create_overlay_window(
+        app,
+        "settings",
+        "settings.html",
+        "Shy notes — Settings",
+        440.0,
+        560.0,
+        true,
+    )
 }
 
 fn open_about_window(app: &AppHandle) -> Result<(), String> {
@@ -366,6 +387,7 @@ fn open_about_window(app: &AppHandle) -> Result<(), String> {
     let _gate = GATE.lock();
 
     if let Some(existing) = app.get_webview_window("about") {
+        debug_log("open_about: reuse existing window");
         let _ = existing.set_always_on_top(true);
         position_beside_note(app, &existing);
         let _ = existing.unminimize();
@@ -373,18 +395,74 @@ fn open_about_window(app: &AppHandle) -> Result<(), String> {
         let _ = existing.set_focus();
         return Ok(());
     }
-    let about = WebviewWindowBuilder::new(app, "about", WebviewUrl::App("about.html".into()))
-        .title("Shy notes — About")
-        .inner_size(380.0, 320.0)
-        .resizable(false)
+
+    debug_log("open_about: creating window");
+    create_overlay_window(
+        app,
+        "about",
+        "about.html",
+        "Shy notes — About",
+        380.0,
+        320.0,
+        false,
+    )
+}
+
+/// Build a secondary window. On Windows, `WebviewWindowBuilder::build` must not run on the
+/// UI / invoke thread or the whole app deadlocks (WebView2).
+fn create_overlay_window(
+    app: &AppHandle,
+    label: &str,
+    page: &str,
+    title: &str,
+    width: f64,
+    height: f64,
+    resizable: bool,
+) -> Result<(), String> {
+    let app = app.clone();
+    let label = label.to_string();
+    let page = page.to_string();
+    let title = title.to_string();
+
+    let build = move || -> Result<(), String> {
+        let mut builder = WebviewWindowBuilder::new(
+            &app,
+            &label,
+            WebviewUrl::App(page.into()),
+        )
+        .title(title)
+        .inner_size(width, height)
         .always_on_top(true)
-        .visible(false)
-        .build()
-        .map_err(|e| e.to_string())?;
-    position_beside_note(app, &about);
-    let _ = about.show();
-    let _ = about.set_focus();
-    Ok(())
+        .visible(false);
+        if resizable {
+            builder = builder.min_inner_size(360.0, 420.0).resizable(true);
+        } else {
+            builder = builder.resizable(false);
+        }
+        let window = builder.build().map_err(|e| e.to_string())?;
+        position_beside_note(&app, &window);
+        let _ = window.show();
+        let _ = window.set_focus();
+        debug_log(format!("overlay window `{label}` shown"));
+        Ok(())
+    };
+
+    #[cfg(target_os = "windows")]
+    {
+        let (tx, rx) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            let _ = tx.send(build());
+        });
+        return rx
+            .recv()
+            .map_err(|e| format!("window create thread: {e}"))
+            .and_then(|r| r);
+    }
+
+    #[cfg(not(target_os = "windows"))]
+    {
+        build()
+    }
 }
 
 /// Windows deadlocks if a secondary WebView is created on the UI/command thread.
@@ -889,6 +967,11 @@ pub fn run() {
         ])
         .setup(move |app| {
             let handle = app.handle().clone();
+            if let Some(path) = log_file_path() {
+                debug_log(format!("shy-notes {} starting; log file: {}", env!("CARGO_PKG_VERSION"), path.display()));
+            } else {
+                debug_log(format!("shy-notes {} starting (no log file path)", env!("CARGO_PKG_VERSION")));
+            }
             let window = app
                 .get_webview_window("main")
                 .expect("main window missing");

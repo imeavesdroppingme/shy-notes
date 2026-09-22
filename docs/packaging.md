@@ -28,7 +28,17 @@ Cross-platform bundles are produced by [`.github/workflows/release.yml`](../.git
    - `git tag v0.1.0 && git push origin v0.1.0`
 3. Open the **draft** release on GitHub, download assets, then publish when ready.
 
-Builds are **unsigned** (no Apple/Windows certificates). That is intentional for now.
+### Debugging logs
+
+shy-notes always appends diagnostics to a local log file:
+
+| OS | Path |
+| -- | ---- |
+| macOS | `~/Library/Application Support/com.imeavesdropping.shy-notes/shy-notes.log` |
+| Windows | `%LOCALAPPDATA%\com.imeavesdropping.shy-notes\shy-notes.log` |
+| Linux | `~/.local/share/com.imeavesdropping.shy-notes/shy-notes.log` |
+
+Optional stderr mirroring: set env `SHY_NOTES_DEBUG=1` before launch.
 
 ## macOS Gatekeeper (unsigned)
 
