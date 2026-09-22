@@ -72,11 +72,14 @@
       <div id="a11y" class="a11y hidden" role="dialog" aria-labelledby="a11y-title">
         <p id="a11y-title"><strong>Accessibility permission needed</strong></p>
         <p>
-          Shy notes needs Accessibility access to track the cursor and gently move aside.
-          Open System Settings, enable Shy notes, then return here.
+          Evasion needs Accessibility for <strong>this exact binary</strong> (dev builds are
+          not the same as the installed Shy notes.app). Enable it in System Settings →
+          Privacy &amp; Security → Accessibility, then <strong>fully quit and relaunch</strong>.
         </p>
+        <p id="a11y-exe" class="a11y-exe mono"></p>
         <div class="a11y-actions">
-          <button id="a11y-open" type="button">Open System Settings</button>
+          <button id="a11y-request" type="button">Request permission</button>
+          <button id="a11y-open" type="button" class="ghost">Open System Settings</button>
           <button id="a11y-dismiss" type="button" class="ghost">Dismiss</button>
         </div>
       </div>

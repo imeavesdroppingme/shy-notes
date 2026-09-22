@@ -19,7 +19,7 @@ If you like this app, leave a short message at [imeavesdropping.com](https://ime
 - Local persistence of text, pose, prefs, and metadata (no accounts, no network, no cloud)
 - Global shortcut: `Cmd+Shift+Space` (macOS) / `Ctrl+Shift+Space` (Windows/Linux)
 - Optional open-at-startup (tray); window close hides to tray
-- macOS Accessibility guidance dialog when permission is missing
+- macOS Accessibility guidance dialog when permission is missing (re-toggle / re-add the app after updates; launch via the `.app`, not `Contents/MacOS/…` from Terminal)
 
 ## Stack
 

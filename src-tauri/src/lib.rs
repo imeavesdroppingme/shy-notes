@@ -404,8 +404,8 @@ fn open_about_window(app: &AppHandle) -> Result<(), String> {
         "about",
         "about.html",
         "Shy notes — About",
-        380.0,
-        320.0,
+        400.0,
+        420.0,
         false,
     )
 }
@@ -701,9 +701,38 @@ fn notify_resized(w: f64, h: f64, state: tauri::State<'_, SharedState>) {
     persist_from_controller(&mut inner);
 }
 
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct AccessibilityStatus {
+    trusted: bool,
+    executable: String,
+}
+
 #[tauri::command]
 fn check_accessibility() -> bool {
     permissions::is_accessibility_trusted(false)
+}
+
+#[tauri::command]
+fn get_accessibility_status() -> AccessibilityStatus {
+    AccessibilityStatus {
+        trusted: permissions::is_accessibility_trusted(false),
+        executable: permissions::current_exe_display(),
+    }
+}
+
+#[tauri::command]
+fn request_accessibility() -> AccessibilityStatus {
+    // System prompt must run for *this* process (dev binary ≠ installed .app).
+    let trusted = permissions::is_accessibility_trusted(true);
+    debug_log(format!(
+        "request_accessibility → trusted={trusted} exe={}",
+        permissions::current_exe_display()
+    ));
+    AccessibilityStatus {
+        trusted,
+        executable: permissions::current_exe_display(),
+    }
 }
 
 #[tauri::command]
@@ -988,6 +1017,8 @@ pub fn run() {
             end_drag,
             notify_resized,
             check_accessibility,
+            get_accessibility_status,
+            request_accessibility,
             open_accessibility_settings,
             quit_app,
             hide_window,
@@ -1018,6 +1049,30 @@ pub fn run() {
                 debug_log(format!("shy-notes {} starting; log file: {}", env!("CARGO_PKG_VERSION"), path.display()));
             } else {
                 debug_log(format!("shy-notes {} starting (no log file path)", env!("CARGO_PKG_VERSION")));
+            }
+            #[cfg(target_os = "macos")]
+            {
+                let exe = permissions::current_exe_display();
+                let trusted = permissions::is_accessibility_trusted(false);
+                debug_log(format!(
+                    "macOS Accessibility trusted={trusted} exe={exe}"
+                ));
+                if !trusted {
+                    // Prompt on the main thread for *this* binary (dev ≠ /Applications).
+                    let after = permissions::is_accessibility_trusted(true);
+                    debug_log(format!(
+                        "macOS Accessibility prompt dismissed; trusted={after}"
+                    ));
+                    if !after {
+                        let _ = handle.emit(
+                            "accessibility-needed",
+                            AccessibilityStatus {
+                                trusted: false,
+                                executable: exe,
+                            },
+                        );
+                    }
+                }
             }
             let window = app
                 .get_webview_window("main")
@@ -1227,7 +1282,9 @@ pub fn run() {
             let loop_handle = handle.clone();
             std::thread::spawn(move || {
                 // Keep DeviceState off SharedState: on Linux it is !Send (Rc/X11).
-                let mouse = MouseTracker::new();
+                // Do not call DeviceState::new() — it asserts/panics without Accessibility
+                // on macOS (and without X11 on Linux). Create lazily via checked_new.
+                let mut mouse = MouseTracker::new();
                 let mut tick: u64 = 0;
                 #[cfg(target_os = "linux")]
                 {
@@ -1253,10 +1310,42 @@ pub fn run() {
                             let mut inner = loop_state.lock();
                             if !inner.permission_prompted {
                                 inner.permission_prompted = true;
-                                let _ = loop_handle.emit("accessibility-needed", ());
+                                let status = AccessibilityStatus {
+                                    trusted: false,
+                                    executable: permissions::current_exe_display(),
+                                };
+                                let _ = loop_handle.emit("accessibility-needed", status.clone());
+                                debug_log(format!(
+                                    "macOS Accessibility not trusted for this process — enable THIS binary in Privacy settings (not only the installed .app), then fully quit and relaunch: {}",
+                                    status.executable
+                                ));
                             }
                             continue;
                         }
+                    }
+
+                    if !mouse.ensure_ready() {
+                        #[cfg(target_os = "macos")]
+                        {
+                            let mut inner = loop_state.lock();
+                            if !inner.permission_prompted {
+                                inner.permission_prompted = true;
+                                let status = AccessibilityStatus {
+                                    trusted: false,
+                                    executable: permissions::current_exe_display(),
+                                };
+                                let _ = loop_handle.emit("accessibility-needed", status.clone());
+                                debug_log(format!(
+                                    "mouse backend still unavailable after AX trust check — restart after toggling Accessibility for {}",
+                                    status.executable
+                                ));
+                            }
+                        }
+                        #[cfg(target_os = "linux")]
+                        if tick % 120 == 1 {
+                            debug_log("mouse backend unavailable (no X display?)");
+                        }
+                        continue;
                     }
 
                     // Window APIs must stay outside the state lock. Holding the mutex
@@ -1269,7 +1358,9 @@ pub fn run() {
                     };
                     let block_repulsion = overlay_blocks_repulsion(&loop_handle);
                     let ctrl = mouse.ctrl_held();
-                    let mut sample = mouse.sample();
+                    let Some(mut sample) = mouse.sample() else {
+                        continue;
+                    };
                     // device_query on macOS is in points; core uses physical pixels.
                     // On Windows/Linux the coords already match PhysicalPosition space —
                     // multiplying by scale_factor breaks flee/glow (esp. HiDPI Linux).

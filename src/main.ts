@@ -669,10 +669,20 @@ async function init() {
     if (item) item.textContent = visible ? "Hide" : "Show";
   });
 
-  await listen("accessibility-needed", () => {
-    a11y().classList.remove("hidden");
+  await listen<{ trusted?: boolean; executable?: string }>("accessibility-needed", (ev) => {
+    showA11y(ev.payload?.executable);
   });
 
+  document.getElementById("a11y-request")?.addEventListener("click", () => {
+    void invoke<{ trusted: boolean; executable: string }>("request_accessibility")
+      .then((status) => {
+        showA11y(status.executable);
+        if (status.trusted) {
+          a11y().classList.add("hidden");
+        }
+      })
+      .catch((err) => console.warn("[shy-notes] request_accessibility failed", err));
+  });
   document.getElementById("a11y-open")?.addEventListener("click", () => {
     void invoke("open_accessibility_settings");
   });
@@ -682,14 +692,29 @@ async function init() {
 
   await win.onFocusChanged(async ({ payload: focused }) => {
     if (!focused) return;
-    const ok = await invoke<boolean>("check_accessibility");
-    if (ok) a11y().classList.add("hidden");
+    const status = await invoke<{ trusted: boolean; executable: string }>(
+      "get_accessibility_status",
+    );
+    if (status.trusted) a11y().classList.add("hidden");
+    else showA11y(status.executable);
   });
 
-  const ok = await invoke<boolean>("check_accessibility");
-  if (!ok) a11y().classList.remove("hidden");
+  {
+    const status = await invoke<{ trusted: boolean; executable: string }>(
+      "get_accessibility_status",
+    );
+    if (!status.trusted) showA11y(status.executable);
+  }
 
   refreshLineNumbers();
+}
+
+function showA11y(executable?: string) {
+  a11y().classList.remove("hidden");
+  const el = document.getElementById("a11y-exe");
+  if (el && executable) {
+    el.textContent = executable;
+  }
 }
 
 void init();

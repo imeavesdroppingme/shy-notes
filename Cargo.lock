@@ -3287,6 +3287,7 @@ dependencies = [
  "device_query",
  "dirs 6.0.0",
  "interaction-core",
+ "macos-accessibility-client",
  "parking_lot",
  "serde",
  "serde_json",

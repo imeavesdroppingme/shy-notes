@@ -406,6 +406,13 @@ body {
   margin: 0 0 0.5rem;
 }
 
+.a11y-exe {
+  margin: 0 0 0.55rem !important;
+  font-size: 0.68rem;
+  word-break: break-all;
+  color: var(--muted);
+}
+
 .a11y-actions {
   display: flex;
   gap: 0.4rem;
