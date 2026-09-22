@@ -300,12 +300,17 @@ const TEXT_FILE_RE =
 
 function insertAtCursor(text: string) {
   const el = editor();
+  el.focus();
   const start = el.selectionStart;
   const end = el.selectionEnd;
-  el.value = el.value.slice(0, start) + text + el.value.slice(end);
-  const caret = start + text.length;
-  el.setSelectionRange(caret, caret);
-  el.focus();
+  // Prefer insertText so the drop joins the native undo stack (Ctrl/Cmd+Z).
+  el.setSelectionRange(start, end);
+  const inserted = document.execCommand("insertText", false, text);
+  if (!inserted || el.value.slice(start, start + text.length) !== text) {
+    el.value = el.value.slice(0, start) + text + el.value.slice(end);
+    const caret = start + text.length;
+    el.setSelectionRange(caret, caret);
+  }
   scheduleSave();
 }
 

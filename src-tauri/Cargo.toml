@@ -1,6 +1,6 @@
 [package]
 name = "shy-notes"
-version = "0.1.5"
+version = "0.1.6"
 description = "A floating notepad that gently moves aside when your cursor approaches"
 authors = ["imeavesdropping"]
 edition = "2021"
