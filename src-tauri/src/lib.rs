@@ -768,6 +768,7 @@ fn save_settings(
     let (saved_prefs, snap) = {
         let mut inner = state.lock();
         inner.snapshot.prefs = prefs;
+        inner.snapshot.prefs.tab_size = inner.snapshot.prefs.tab_size.clamp(2, 8);
         inner.controller.params = inner.snapshot.prefs.to_interaction_params();
 
         let meta = &mut inner.snapshot.active_note_mut().meta;
@@ -866,6 +867,7 @@ fn set_prefs(
     let saved = {
         let mut inner = state.lock();
         inner.snapshot.prefs = prefs;
+        inner.snapshot.prefs.tab_size = inner.snapshot.prefs.tab_size.clamp(2, 8);
         inner.controller.params = inner.snapshot.prefs.to_interaction_params();
         persist_from_controller(&mut inner);
         inner.snapshot.prefs.clone()

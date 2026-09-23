@@ -197,6 +197,13 @@ pub struct UserPrefs {
     pub use_monospace: bool,
     #[serde(default)]
     pub open_at_startup: bool,
+    /// Number of spaces inserted when Tab is pressed in the editor.
+    #[serde(default = "default_tab_size")]
+    pub tab_size: u8,
+}
+
+fn default_tab_size() -> u8 {
+    4
 }
 
 impl Default for UserPrefs {
@@ -210,6 +217,7 @@ impl Default for UserPrefs {
             show_line_numbers: false,
             use_monospace: false,
             open_at_startup: false,
+            tab_size: 4,
         }
     }
 }

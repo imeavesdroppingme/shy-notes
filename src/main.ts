@@ -28,6 +28,7 @@ type UserPrefs = {
   show_line_numbers: boolean;
   use_monospace: boolean;
   open_at_startup: boolean;
+  tab_size?: number;
 };
 
 type ActiveNoteDto = {
@@ -74,6 +75,7 @@ let pinInFlight = false;
 let showGlow = true;
 let showLineNumbers = false;
 let useMonospace = false;
+let tabSize = 4;
 let activeNoteId = "";
 let switchingNote = false;
 let lineMirror: HTMLDivElement | null = null;
@@ -145,7 +147,8 @@ function applyNoteMeta(note: NoteMeta) {
   } else {
     appEl().style.removeProperty("--note-fg");
   }
-  const size = Math.max(10, Math.min(28, Number(note.font_size) || 15));
+  const size = Math.max(FONT_MIN, Math.min(FONT_MAX, Number(note.font_size) || 15));
+  currentFontSize = size;
   appEl().style.setProperty("--note-font-size", `${size}px`);
   const { bg } = resolveColors(note.background, note.foreground);
   noteComboSwatch().style.background = bg;
@@ -208,6 +211,7 @@ function applyActiveNote(payload: ActiveNoteDto, updateEditor: boolean) {
   if (updateEditor) {
     editor().value = payload.text ?? "";
     scheduleLineNumbers();
+    updateDocStats();
   }
 }
 
@@ -215,6 +219,7 @@ function applyPrefs(prefs: UserPrefs) {
   showGlow = !!prefs.show_glow;
   showLineNumbers = !!prefs.show_line_numbers;
   useMonospace = !!prefs.use_monospace;
+  tabSize = Math.max(2, Math.min(8, Math.round(Number(prefs.tab_size) || 4)));
   gutter().classList.toggle("hidden", !showLineNumbers);
   editor().classList.toggle("monospace", useMonospace);
   gutter().classList.toggle("monospace", useMonospace);
@@ -287,11 +292,379 @@ function scheduleSave() {
     void invoke("save_text", { text: editor().value });
   }, 700);
   scheduleLineNumbers();
+  updateDocStats();
 }
 
 function flushSave() {
   window.clearTimeout(saveTimer);
   void invoke("save_text", { text: editor().value });
+}
+
+const FONT_MIN = 10;
+const FONT_MAX = 28;
+let currentFontSize = 15;
+
+type TextMatch = { start: number; end: number; line: number; preview: string };
+
+let findMatches: TextMatch[] = [];
+let findIndex = -1;
+
+function findPanel() {
+  return document.getElementById("find-panel")!;
+}
+function findQuery() {
+  return document.getElementById("find-query") as HTMLInputElement;
+}
+function findReplaceInput() {
+  return document.getElementById("find-replace") as HTMLInputElement;
+}
+function findStatus() {
+  return document.getElementById("find-status")!;
+}
+function findResults() {
+  return document.getElementById("find-results")!;
+}
+
+function updateDocStats() {
+  const text = editor().value;
+  const lines = text.length === 0 ? 1 : text.split("\n").length;
+  const words = (text.trim().match(/\S+/g) || []).length;
+  const el = document.getElementById("doc-stats");
+  if (el) {
+    el.textContent = `${lines} line${lines === 1 ? "" : "s"} · ${words} word${words === 1 ? "" : "s"}`;
+  }
+}
+
+function setFontSize(size: number, persist: boolean) {
+  currentFontSize = Math.max(FONT_MIN, Math.min(FONT_MAX, Math.round(size)));
+  appEl().style.setProperty("--note-font-size", `${currentFontSize}px`);
+  scheduleLineNumbers();
+  if (persist) {
+    void invoke("set_note_font_size", { fontSize: currentFontSize }).catch((err) =>
+      console.warn("[shy-notes] set_note_font_size failed", err),
+    );
+  }
+}
+
+/** `*` = any run of characters; other regex metacharacters are literal. */
+function wildcardToRegExp(pattern: string, matchCase: boolean): RegExp | null {
+  if (!pattern) return null;
+  const escaped = pattern
+    .replace(/[.+?^${}()|[\]\\]/g, "\\$&")
+    .replace(/\*/g, "[\\s\\S]*?");
+  try {
+    return new RegExp(escaped, matchCase ? "g" : "gi");
+  } catch {
+    return null;
+  }
+}
+
+function matchCaseEnabled(): boolean {
+  return !!(document.getElementById("find-match-case") as HTMLInputElement | null)?.checked;
+}
+
+function lineAtOffset(text: string, offset: number): number {
+  let line = 1;
+  for (let i = 0; i < offset && i < text.length; i++) {
+    if (text.charCodeAt(i) === 10) line++;
+  }
+  return line;
+}
+
+function previewAt(text: string, start: number, end: number): string {
+  const lineStart = text.lastIndexOf("\n", start - 1) + 1;
+  let lineEnd = text.indexOf("\n", end);
+  if (lineEnd < 0) lineEnd = text.length;
+  const line = text.slice(lineStart, lineEnd).trim();
+  return line.length > 72 ? `${line.slice(0, 72)}…` : line;
+}
+
+function collectMatches(pattern: string): TextMatch[] {
+  const re = wildcardToRegExp(pattern, matchCaseEnabled());
+  if (!re) return [];
+  const text = editor().value;
+  const out: TextMatch[] = [];
+  let m: RegExpExecArray | null;
+  re.lastIndex = 0;
+  while ((m = re.exec(text)) !== null) {
+    const start = m.index;
+    const end = start + m[0].length;
+    // Empty match (e.g. pattern "*") — advance to avoid infinite loop.
+    if (end === start) {
+      re.lastIndex = start + 1;
+      continue;
+    }
+    out.push({
+      start,
+      end,
+      line: lineAtOffset(text, start),
+      preview: previewAt(text, start, end),
+    });
+    if (out.length >= 500) break;
+  }
+  return out;
+}
+
+function scrollSelectionIntoView(el: HTMLTextAreaElement) {
+  const before = el.value.slice(0, el.selectionStart);
+  const line = before.split("\n").length;
+  const lh = parseFloat(getComputedStyle(el).lineHeight) || 18;
+  const target = (line - 1) * lh - el.clientHeight * 0.35;
+  el.scrollTop = Math.max(0, target);
+}
+
+function selectMatch(match: TextMatch) {
+  const el = editor();
+  el.focus();
+  el.setSelectionRange(match.start, match.end);
+  scrollSelectionIntoView(el);
+}
+
+function refreshFindStatus() {
+  const n = findMatches.length;
+  if (!findQuery().value) {
+    findStatus().textContent = "";
+    return;
+  }
+  if (n === 0) {
+    findStatus().textContent = "No matches";
+    return;
+  }
+  findStatus().textContent = `${findIndex + 1} of ${n}`;
+}
+
+function revealMatch(index: number) {
+  if (findMatches.length === 0) {
+    findIndex = -1;
+    refreshFindStatus();
+    return;
+  }
+  findIndex = ((index % findMatches.length) + findMatches.length) % findMatches.length;
+  selectMatch(findMatches[findIndex]);
+  refreshFindStatus();
+}
+
+function runFind(keepIndex: boolean) {
+  const q = findQuery().value;
+  const prevStart = keepIndex && findIndex >= 0 ? findMatches[findIndex]?.start : -1;
+  findMatches = collectMatches(q);
+  if (findMatches.length === 0) {
+    findIndex = -1;
+    refreshFindStatus();
+    return;
+  }
+  if (keepIndex && prevStart >= 0) {
+    const near = findMatches.findIndex((m) => m.start >= prevStart);
+    findIndex = near >= 0 ? near : 0;
+  } else {
+    const caret = editor().selectionStart;
+    const near = findMatches.findIndex((m) => m.start >= caret);
+    findIndex = near >= 0 ? near : 0;
+  }
+  revealMatch(findIndex);
+}
+
+function showFindResults() {
+  const box = findResults();
+  box.replaceChildren();
+  if (findMatches.length === 0) {
+    box.classList.add("hidden");
+    return;
+  }
+  box.classList.remove("hidden");
+  const frag = document.createDocumentFragment();
+  for (let i = 0; i < findMatches.length; i++) {
+    const m = findMatches[i];
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "find-result";
+    btn.role = "option";
+    btn.dataset.index = String(i);
+    btn.innerHTML = `<span class="ln">L${m.line}</span>${escapeHtml(m.preview)}`;
+    frag.appendChild(btn);
+  }
+  box.appendChild(frag);
+}
+
+function escapeHtml(s: string): string {
+  return s
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
+}
+
+function setFindTab(tab: "find" | "replace") {
+  findPanel()
+    .querySelectorAll<HTMLButtonElement>(".find-tab")
+    .forEach((b) => b.classList.toggle("active", b.dataset.findTab === tab));
+  document.getElementById("find-replace-row")!.classList.toggle("hidden", tab !== "replace");
+}
+
+function openFindPanel(tab: "find" | "replace" = "find") {
+  const panel = findPanel();
+  panel.classList.remove("hidden");
+  setFindTab(tab);
+  const el = editor();
+  const selected = el.value.slice(el.selectionStart, el.selectionEnd);
+  if (selected && !selected.includes("\n")) {
+    findQuery().value = selected;
+  }
+  findQuery().focus();
+  findQuery().select();
+  if (findQuery().value) runFind(false);
+}
+
+function closeFindPanel() {
+  findPanel().classList.add("hidden");
+  findResults().classList.add("hidden");
+  findResults().replaceChildren();
+  findStatus().textContent = "";
+}
+
+function replaceCurrent() {
+  if (findMatches.length === 0) runFind(false);
+  if (findIndex < 0 || findIndex >= findMatches.length) return;
+  const match = findMatches[findIndex];
+  const el = editor();
+  const replacement = findReplaceInput().value;
+  el.focus();
+  el.setSelectionRange(match.start, match.end);
+  const ok = document.execCommand("insertText", false, replacement);
+  if (!ok) {
+    el.value =
+      el.value.slice(0, match.start) + replacement + el.value.slice(match.end);
+    el.setSelectionRange(match.start + replacement.length, match.start + replacement.length);
+  }
+  scheduleSave();
+  updateDocStats();
+  // Re-scan and jump to next occurrence after this replace.
+  const nextCaret = match.start + replacement.length;
+  findMatches = collectMatches(findQuery().value);
+  const near = findMatches.findIndex((m) => m.start >= nextCaret);
+  findIndex = near >= 0 ? near : findMatches.length > 0 ? 0 : -1;
+  if (findIndex >= 0) revealMatch(findIndex);
+  else refreshFindStatus();
+  showFindResults();
+}
+
+function replaceAll() {
+  const q = findQuery().value;
+  const re = wildcardToRegExp(q, matchCaseEnabled());
+  if (!re) return;
+  const el = editor();
+  const replacement = findReplaceInput().value;
+  const before = el.value;
+  // Rebuild without empty matches; literal replacement string.
+  const next = before.replace(re, (m) => (m.length === 0 ? m : replacement));
+  if (next === before) {
+    findStatus().textContent = "No matches";
+    return;
+  }
+  el.focus();
+  el.select();
+  const ok = document.execCommand("insertText", false, next);
+  if (!ok) {
+    el.value = next;
+  }
+  scheduleSave();
+  updateDocStats();
+  findMatches = collectMatches(q);
+  findIndex = findMatches.length > 0 ? 0 : -1;
+  refreshFindStatus();
+  showFindResults();
+  if (findIndex >= 0) revealMatch(findIndex);
+}
+
+function wireFindPanel() {
+  const panel = findPanel();
+  const dragHandle = panel.querySelector("[data-find-drag]") as HTMLElement | null;
+  if (dragHandle) {
+    let dragging = false;
+    let startX = 0;
+    let startY = 0;
+    let origLeft = 0;
+    let origTop = 0;
+    dragHandle.addEventListener("mousedown", (ev) => {
+      const t = ev.target as HTMLElement | null;
+      if (t?.closest("button")) return;
+      ev.preventDefault();
+      ev.stopPropagation();
+      const rect = panel.getBoundingClientRect();
+      const parent = appEl().getBoundingClientRect();
+      dragging = true;
+      startX = ev.clientX;
+      startY = ev.clientY;
+      origLeft = rect.left - parent.left;
+      origTop = rect.top - parent.top;
+      panel.style.left = `${origLeft}px`;
+      panel.style.top = `${origTop}px`;
+      panel.style.right = "auto";
+    });
+    window.addEventListener("mousemove", (ev) => {
+      if (!dragging) return;
+      const parent = appEl().getBoundingClientRect();
+      const nextLeft = origLeft + (ev.clientX - startX);
+      const nextTop = origTop + (ev.clientY - startY);
+      const maxLeft = Math.max(0, parent.width - panel.offsetWidth);
+      const maxTop = Math.max(0, parent.height - panel.offsetHeight);
+      panel.style.left = `${Math.min(maxLeft, Math.max(0, nextLeft))}px`;
+      panel.style.top = `${Math.min(maxTop, Math.max(0, nextTop))}px`;
+    });
+    window.addEventListener("mouseup", () => {
+      dragging = false;
+    });
+  }
+
+  document.querySelectorAll<HTMLButtonElement>(".find-tab").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const tab = btn.dataset.findTab === "replace" ? "replace" : "find";
+      setFindTab(tab);
+    });
+  });
+  document.getElementById("find-close")?.addEventListener("click", closeFindPanel);
+  document.getElementById("find-next")?.addEventListener("click", () => {
+    if (findMatches.length === 0) runFind(false);
+    else revealMatch(findIndex + 1);
+  });
+  document.getElementById("find-prev")?.addEventListener("click", () => {
+    if (findMatches.length === 0) runFind(false);
+    else revealMatch(findIndex - 1);
+  });
+  document.getElementById("find-all-btn")?.addEventListener("click", () => {
+    runFind(true);
+    showFindResults();
+  });
+  document.getElementById("find-match-case")?.addEventListener("change", () => {
+    if (findQuery().value) runFind(true);
+  });
+  document.getElementById("find-replace-one")?.addEventListener("click", replaceCurrent);
+  document.getElementById("find-replace-all")?.addEventListener("click", replaceAll);
+  findQuery().addEventListener("keydown", (ev) => {
+    if (ev.key === "Enter") {
+      ev.preventDefault();
+      if (ev.shiftKey) {
+        if (findMatches.length === 0) runFind(false);
+        else revealMatch(findIndex - 1);
+      } else {
+        if (findMatches.length === 0) runFind(false);
+        else revealMatch(findIndex + 1);
+      }
+    }
+  });
+  findReplaceInput().addEventListener("keydown", (ev) => {
+    if (ev.key === "Enter") {
+      ev.preventDefault();
+      replaceCurrent();
+    }
+  });
+  findResults().addEventListener("click", (ev) => {
+    const btn = (ev.target as HTMLElement | null)?.closest("button[data-index]") as
+      | HTMLButtonElement
+      | null;
+    if (!btn?.dataset.index) return;
+    revealMatch(Number(btn.dataset.index));
+  });
 }
 
 const MAX_DROP_BYTES = 2 * 1024 * 1024;
@@ -527,6 +900,7 @@ async function init() {
   const win = getCurrentWindow();
 
   wireDragAndDrop();
+  wireFindPanel();
 
   editor().addEventListener("input", scheduleSave);
   editor().addEventListener("blur", flushSave);
@@ -550,6 +924,14 @@ async function init() {
   if (wrap && typeof ResizeObserver !== "undefined") {
     new ResizeObserver(() => scheduleLineNumbers()).observe(wrap);
   }
+
+  editor().addEventListener("keydown", (ev) => {
+    if (ev.key === "Tab" && !ev.altKey && !ev.ctrlKey && !ev.metaKey) {
+      ev.preventDefault();
+      insertAtCursor(" ".repeat(tabSize));
+      return;
+    }
+  });
 
   noteComboTrigger().addEventListener("click", (ev) => {
     ev.stopPropagation();
@@ -597,6 +979,8 @@ async function init() {
       void createNote();
     } else if (action === "settings") {
       void invoke("open_settings");
+    } else if (action === "find") {
+      openFindPanel("find");
     } else if (action === "about") {
       void invoke("open_about");
     } else if (action === "pin") {
@@ -615,9 +999,40 @@ async function init() {
     if (!menu) closeMenu();
   });
   document.addEventListener("keydown", (ev) => {
+    const mod = ev.metaKey || ev.ctrlKey;
     if (ev.key === "Escape") {
       closeMenu();
       setComboOpen(false);
+      if (!findPanel().classList.contains("hidden")) {
+        closeFindPanel();
+        ev.preventDefault();
+      }
+      return;
+    }
+    if (mod && ev.key.toLowerCase() === "f" && !ev.shiftKey && !ev.altKey) {
+      ev.preventDefault();
+      openFindPanel("find");
+      return;
+    }
+    if (mod && ev.altKey && ev.key.toLowerCase() === "f") {
+      ev.preventDefault();
+      openFindPanel("replace");
+      return;
+    }
+    if (mod && (ev.key === "=" || ev.key === "+") && !ev.altKey) {
+      ev.preventDefault();
+      setFontSize(currentFontSize + 1, true);
+      return;
+    }
+    if (mod && ev.key === "-" && !ev.altKey) {
+      ev.preventDefault();
+      setFontSize(currentFontSize - 1, true);
+      return;
+    }
+    if (mod && ev.key.toLowerCase() === "g" && !findPanel().classList.contains("hidden")) {
+      ev.preventDefault();
+      if (findMatches.length === 0) runFind(false);
+      else revealMatch(ev.shiftKey ? findIndex - 1 : findIndex + 1);
     }
   });
 
@@ -712,6 +1127,7 @@ async function init() {
   }
 
   refreshLineNumbers();
+  updateDocStats();
 }
 
 function showA11y(executable?: string) {

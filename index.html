@@ -35,6 +35,7 @@
               </svg>
             </button>
             <div id="app-menu" class="app-menu hidden" role="menu">
+              <button type="button" role="menuitem" data-action="find">Find…</button>
               <button type="button" role="menuitem" data-action="new-note">New note</button>
               <button type="button" role="menuitem" data-action="settings">Settings…</button>
               <button type="button" role="menuitem" data-action="about">About…</button>
@@ -68,6 +69,35 @@
           placeholder="Write freely…"
           aria-label="Note"
         ></textarea>
+      </div>
+      <footer class="status-bar" aria-live="polite">
+        <span id="doc-stats">1 line · 0 words</span>
+      </footer>
+      <div id="find-panel" class="find-panel hidden" role="dialog" aria-label="Find and replace">
+        <div class="find-tabs" data-find-drag>
+          <button type="button" class="find-tab active" data-find-tab="find">Find</button>
+          <button type="button" class="find-tab" data-find-tab="replace">Replace</button>
+          <button type="button" id="find-close" class="find-close" aria-label="Close">×</button>
+        </div>
+        <div class="find-row">
+          <input id="find-query" type="text" placeholder="Find (* = any text)" autocomplete="off" spellcheck="false" />
+          <button type="button" id="find-prev" title="Previous">↑</button>
+          <button type="button" id="find-next" title="Next">↓</button>
+        </div>
+        <div id="find-replace-row" class="find-row hidden">
+          <input id="find-replace" type="text" placeholder="Replace with" autocomplete="off" spellcheck="false" />
+          <button type="button" id="find-replace-one">Replace</button>
+          <button type="button" id="find-replace-all">All</button>
+        </div>
+        <div class="find-toolbar">
+          <label class="find-check">
+            <input id="find-match-case" type="checkbox" />
+            <span>Match case</span>
+          </label>
+          <button type="button" id="find-all-btn">Find all</button>
+          <span id="find-status" class="find-status"></span>
+        </div>
+        <div id="find-results" class="find-results hidden" role="listbox"></div>
       </div>
       <div id="a11y" class="a11y hidden" role="dialog" aria-labelledby="a11y-title">
         <p id="a11y-title"><strong>Accessibility permission needed</strong></p>

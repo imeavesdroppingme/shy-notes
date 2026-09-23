@@ -18,6 +18,7 @@ type UserPrefs = {
   show_line_numbers: boolean;
   use_monospace: boolean;
   open_at_startup: boolean;
+  tab_size?: number;
 };
 
 const THEME_DEFAULT_BG = "#f3efe6";
@@ -179,6 +180,7 @@ async function init() {
   const lines = $("show-line-numbers") as HTMLInputElement;
   const mono = $("use-monospace") as HTMLInputElement;
   const openAtStartup = $("open-at-startup") as HTMLInputElement;
+  const tabSize = bindRange("tab-size", "tab-size-out", (v) => `${Math.round(v)} spaces`);
   const title = $("note-title") as HTMLInputElement;
 
   strength.value = String(prefs.repulsion_strength);
@@ -189,10 +191,12 @@ async function init() {
   lines.checked = prefs.show_line_numbers;
   mono.checked = !!prefs.use_monospace;
   openAtStartup.checked = !!prefs.open_at_startup;
+  tabSize.value = String(Math.max(2, Math.min(8, Number(prefs.tab_size) || 4)));
   strength.dispatchEvent(new Event("input"));
   influence.dispatchEvent(new Event("input"));
   capture.dispatchEvent(new Event("input"));
   fontSize.dispatchEvent(new Event("input"));
+  tabSize.dispatchEvent(new Event("input"));
 
   title.value = note.title ?? "";
   const bg = bindColorField(
@@ -229,6 +233,7 @@ async function init() {
         show_line_numbers: lines.checked,
         use_monospace: mono.checked,
         open_at_startup: openAtStartup.checked,
+        tab_size: Math.max(2, Math.min(8, Math.round(Number(tabSize.value) || 4))),
       };
       const titleVal = title.value.trim();
       const paired = pairNoteColors(

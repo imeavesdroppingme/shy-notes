@@ -38,6 +38,7 @@ body {
 }
 
 .app {
+  position: relative;
   display: flex;
   flex-direction: column;
   height: 100%;
@@ -431,6 +432,172 @@ body {
 
 .a11y button.ghost {
   background: transparent;
+}
+
+.status-bar {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  padding: 0.15rem 0.55rem;
+  border-top: 1px solid var(--line);
+  background: var(--chrome);
+  font-size: 0.68rem;
+  color: var(--muted);
+  user-select: none;
+}
+
+.find-panel {
+  position: absolute;
+  top: 2.6rem;
+  right: 0.45rem;
+  z-index: 30;
+  width: min(20rem, calc(100% - 0.9rem));
+  padding: 0.45rem 0.5rem 0.5rem;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--chrome);
+  box-shadow: 0 10px 28px color-mix(in srgb, #000 18%, transparent);
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+.find-tabs {
+  display: flex;
+  align-items: center;
+  gap: 0.2rem;
+  cursor: grab;
+  user-select: none;
+  margin: -0.15rem -0.15rem 0;
+  padding: 0.15rem;
+  border-radius: 4px;
+}
+
+.find-tabs:active {
+  cursor: grabbing;
+}
+
+.find-check {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  font-size: 0.7rem;
+  color: var(--muted);
+  cursor: pointer;
+  user-select: none;
+}
+
+.find-check input {
+  margin: 0;
+}
+
+.find-tab {
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--muted);
+  border-radius: 4px;
+  padding: 0.15rem 0.45rem;
+  font: inherit;
+  font-size: 0.72rem;
+  cursor: pointer;
+}
+
+.find-tab.active {
+  color: var(--ink);
+  border-color: var(--line);
+  background: color-mix(in srgb, var(--bg) 70%, transparent);
+}
+
+.find-close {
+  margin-left: auto;
+  border: none;
+  background: transparent;
+  color: var(--muted);
+  font: inherit;
+  font-size: 1rem;
+  line-height: 1;
+  cursor: pointer;
+  padding: 0.1rem 0.35rem;
+}
+
+.find-row {
+  display: flex;
+  gap: 0.25rem;
+  align-items: center;
+}
+
+.find-row input {
+  flex: 1;
+  min-width: 0;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  background: var(--bg);
+  color: var(--ink);
+  font: inherit;
+  font-size: 0.78rem;
+  padding: 0.28rem 0.4rem;
+}
+
+.find-row button,
+.find-toolbar button {
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  background: var(--bg);
+  color: var(--ink);
+  font: inherit;
+  font-size: 0.72rem;
+  padding: 0.25rem 0.4rem;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.find-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+.find-status {
+  font-size: 0.68rem;
+  color: var(--muted);
+}
+
+.find-results {
+  max-height: 7.5rem;
+  overflow: auto;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  background: var(--bg);
+  padding: 0.15rem;
+}
+
+.find-result {
+  display: block;
+  width: 100%;
+  text-align: left;
+  border: none;
+  background: transparent;
+  color: var(--ink);
+  font: inherit;
+  font-size: 0.7rem;
+  padding: 0.25rem 0.35rem;
+  border-radius: 3px;
+  cursor: pointer;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.find-result:hover,
+.find-result:focus-visible {
+  background: color-mix(in srgb, var(--accent) 18%, transparent);
+  outline: none;
+}
+
+.find-result .ln {
+  color: var(--muted);
+  margin-right: 0.35rem;
 }
 
 .hidden {
