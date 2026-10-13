@@ -123,14 +123,26 @@ async function togglePinned() {
   }
 }
 
+let lastGlow = -1;
+let lastPreCapture = false;
+
 function setGlow(intensity: number, preCapture: boolean) {
   const el = glowEl();
   if (!showGlow) {
-    el.classList.remove("visible");
-    appEl().classList.remove("pre-capture");
+    if (lastGlow !== 0 || lastPreCapture) {
+      el.classList.remove("visible");
+      appEl().classList.remove("pre-capture");
+      lastGlow = 0;
+      lastPreCapture = false;
+    }
     return;
   }
   const glow = Math.max(0, Math.min(1, intensity));
+  if (Math.abs(glow - lastGlow) < 0.02 && preCapture === lastPreCapture) {
+    return;
+  }
+  lastGlow = glow;
+  lastPreCapture = preCapture;
   el.style.setProperty("--glow-intensity", String(glow));
   el.classList.toggle("visible", glow > 0.02);
   appEl().classList.toggle("pre-capture", preCapture);

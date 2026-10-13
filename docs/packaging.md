@@ -30,15 +30,13 @@ Cross-platform bundles are produced by [`.github/workflows/release.yml`](../.git
 
 ### Debugging logs
 
-shy-notes always appends diagnostics to a local log file:
+File logging is **off by default**. With `SHY_NOTES_DEBUG=1`, diagnostics go to stderr and a local log file:
 
 | OS | Path |
 | -- | ---- |
 | macOS | `~/Library/Application Support/com.imeavesdropping.shy-notes/shy-notes.log` |
 | Windows | `%LOCALAPPDATA%\com.imeavesdropping.shy-notes\shy-notes.log` |
 | Linux | `~/.local/share/com.imeavesdropping.shy-notes/shy-notes.log` |
-
-Optional stderr mirroring: set env `SHY_NOTES_DEBUG=1` before launch.
 
 ## macOS Gatekeeper (unsigned)
 

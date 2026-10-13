@@ -13,7 +13,7 @@ use persist::{
 };
 use serde::Serialize;
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::Arc;
+use std::sync::{mpsc, Arc, OnceLock};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tauri::{
     menu::{Menu, MenuItem, PredefinedMenuItem, Submenu},
@@ -28,8 +28,14 @@ fn debug_log(msg: impl AsRef<str>) {
     let text = msg.as_ref();
     let stamp = chrono::Local::now().format("%Y-%m-%d %H:%M:%S%.3f");
     let line = format!("[{stamp}] {text}");
-    if std::env::var_os("SHY_NOTES_DEBUG").is_some() {
+    let debug = std::env::var_os("SHY_NOTES_DEBUG").is_some();
+    if debug {
         eprintln!("[shy-notes] {text}");
+    }
+    // File log only while debugging — the mouse loop used to append ~1 line/sec forever
+    // (tens of MB on disk and needless I/O every tick).
+    if !debug {
+        return;
     }
     if let Some(path) = log_file_path() {
         use std::io::Write;
@@ -47,6 +53,20 @@ fn log_file_path() -> Option<std::path::PathBuf> {
     let dir = dirs::data_local_dir()?.join("com.imeavesdropping.shy-notes");
     std::fs::create_dir_all(&dir).ok()?;
     Some(dir.join("shy-notes.log"))
+}
+
+/// Drop oversized debug logs from older builds (mouse sampling was always-on).
+fn trim_stale_debug_log() {
+    let Some(path) = log_file_path() else {
+        return;
+    };
+    let Ok(meta) = std::fs::metadata(&path) else {
+        return;
+    };
+    const MAX_BYTES: u64 = 512 * 1024;
+    if meta.len() > MAX_BYTES {
+        let _ = std::fs::remove_file(&path);
+    }
 }
 
 struct VisibilityMenus {
@@ -203,9 +223,21 @@ fn persist_from_controller_blocking(inner: &mut AppInner) {
 }
 
 fn persist_snapshot_async(snapshot: AppStateSnapshot) {
-    std::thread::spawn(move || {
-        let _ = save_state(&snapshot);
+    // One long-lived worker; drain to the latest snapshot so typing cannot spawn threads.
+    static TX: OnceLock<mpsc::Sender<AppStateSnapshot>> = OnceLock::new();
+    let tx = TX.get_or_init(|| {
+        let (tx, rx) = mpsc::channel::<AppStateSnapshot>();
+        std::thread::spawn(move || {
+            while let Ok(mut snap) = rx.recv() {
+                while let Ok(newer) = rx.try_recv() {
+                    snap = newer;
+                }
+                let _ = save_state(&snap);
+            }
+        });
+        tx
     });
+    let _ = tx.send(snapshot);
 }
 
 fn apply_commands(
@@ -213,12 +245,19 @@ fn apply_commands(
     app: &AppHandle,
     cmds: &[InteractionCommand],
     show_glow: bool,
+    last_set_pose: &mut Option<(i32, i32)>,
 ) {
     for cmd in cmds {
         match cmd {
             InteractionCommand::Noop | InteractionCommand::SuppressRepulsion => {}
             InteractionCommand::SetPose { x, y } => {
-                let _ = window.set_position(PhysicalPosition::new(*x as i32, *y as i32));
+                let nx = *x as i32;
+                let ny = *y as i32;
+                // Skip no-op moves — set_position every tick churns AppKit/WebKit memory.
+                if *last_set_pose != Some((nx, ny)) {
+                    let _ = window.set_position(PhysicalPosition::new(nx, ny));
+                    *last_set_pose = Some((nx, ny));
+                }
             }
             InteractionCommand::SetVisual { pre_capture, glow } => {
                 let glow = if show_glow { *glow } else { 0.0 };
@@ -281,6 +320,12 @@ fn show_main_window(app: &AppHandle, state: &SharedState, menus: &MenuHandle) {
         let _ = window.show();
         let _ = window.set_always_on_top(true);
         let _ = window.set_focus();
+        #[cfg(target_os = "macos")]
+        {
+            // Second focus after show — tray activation without a menu can leave the
+            // window visible but not key on the first pass.
+            let _ = window.set_focus();
+        }
     }
 }
 
@@ -310,26 +355,53 @@ fn toggle_visibility(app: &AppHandle, state: &SharedState, menus: &MenuHandle) {
     }
 }
 
-/// Tray left-click: only reveal. Hide via × / menu / hotkey — avoids Click+DoubleClick flash.
+/// macOS: AppKit opens `NSStatusItem.menu` on *left* click whenever it is set, ignoring
+/// `show_menu_on_left_click(false)`. Keep the menu only in tray-icon's private storage and
+/// clear the status-item binding; popup temporarily re-attaches for right-click.
+#[cfg(target_os = "macos")]
+fn macos_detach_tray_status_menu(tray: &tauri::tray::TrayIcon) {
+    let _ = tray.with_inner_tray_icon(|inner| {
+        // Built-in right-click path uses performClick with a permanently attached menu —
+        // we handle right-click ourselves after detaching.
+        inner.set_show_menu_on_right_click(false);
+        if let Some(item) = inner.ns_status_item() {
+            item.setMenu(None);
+        }
+    });
+}
+
+#[cfg(target_os = "macos")]
+fn macos_popup_tray_menu(tray: &tauri::tray::TrayIcon, menu: &tauri::menu::Menu<tauri::Wry>) {
+    // Re-attach so performClick has a menu, then detach again (same pattern as tray-icon master).
+    let _ = tray.set_menu(Some(menu.clone()));
+    let _ = tray.with_inner_tray_icon(|inner| {
+        inner.show_menu();
+        if let Some(item) = inner.ns_status_item() {
+            item.setMenu(None);
+        }
+    });
+}
+
+/// Dock reopen / non-toggle reveal: always show and focus (never hide).
 fn tray_reveal(app: &AppHandle, state: &SharedState, menus: &MenuHandle) {
-    if !visibility_guard_ok() {
+    let concealed = state.lock().main_concealed;
+    if concealed {
+        show_main_window(app, state, menus);
         return;
     }
-    if state.lock().main_concealed {
-        show_main_window(app, state, menus);
-    } else {
-        // Already visible: just raise/focus.
-        debug_log("tray click → focus existing window");
-        #[cfg(target_os = "macos")]
-        {
-            let _ = app.show();
-        }
-        if let Some(window) = app.get_webview_window("main") {
-            let _ = window.unminimize();
-            let _ = window.show();
-            let _ = window.set_always_on_top(true);
-            let _ = window.set_focus();
-        }
+    debug_log("tray reveal → focus existing window");
+    #[cfg(target_os = "macos")]
+    {
+        let _ = app.show();
+    }
+    if let Some(window) = app.get_webview_window("main") {
+        let _ = window.unminimize();
+        let _ = window.show();
+        // always_on_top bounce helps macOS raise the window when activated from the tray
+        // without a menu click (show_menu_on_left_click=false).
+        let _ = window.set_always_on_top(false);
+        let _ = window.set_always_on_top(true);
+        let _ = window.set_focus();
     }
 }
 
@@ -1047,6 +1119,7 @@ pub fn run() {
         ])
         .setup(move |app| {
             let handle = app.handle().clone();
+            trim_stale_debug_log();
             if let Some(path) = log_file_path() {
                 debug_log(format!("shy-notes {} starting; log file: {}", env!("CARGO_PKG_VERSION"), path.display()));
             } else {
@@ -1231,12 +1304,15 @@ pub fn run() {
                 .ok_or_else(|| "missing default window icon".to_string())?;
             let state_tray = shared_for_setup.clone();
             let menus_tray = menus_for_setup.clone();
-            let _tray = TrayIconBuilder::new()
+            #[cfg(target_os = "macos")]
+            let tray_menu_right = tray_menu.clone();
+            // Keep the tray handle alive for the process lifetime (resources table also retains it).
+            let tray = TrayIconBuilder::new()
                 .menu(&tray_menu)
                 .tooltip("Shy notes")
                 .icon(tray_icon)
                 .icon_as_template(false)
-                // Left click toggles visibility; menu on right click.
+                // Left = toggle note visibility; right = context menu.
                 .show_menu_on_left_click(false)
                 .on_menu_event(move |app, event| {
                     debug_log(format!("tray menu {}", event.id.as_ref()));
@@ -1244,22 +1320,47 @@ pub fn run() {
                 })
                 .on_tray_icon_event(move |tray, event| {
                     match event {
+                        // Handle Down: on macOS, activation must run inside the user-gesture
+                        // of the press (Up is often too late → window stays behind).
                         TrayIconEvent::Click {
                             button: MouseButton::Left,
-                            button_state: MouseButtonState::Up,
+                            button_state: MouseButtonState::Down,
                             ..
+                        } => {
+                            debug_log("tray left click → toggle");
+                            toggle_visibility(tray.app_handle(), &state_tray, &menus_tray);
                         }
-                        | TrayIconEvent::DoubleClick {
+                        TrayIconEvent::Click {
+                            button: MouseButton::Right,
+                            button_state: MouseButtonState::Down,
+                            ..
+                        } => {
+                            #[cfg(target_os = "macos")]
+                            {
+                                debug_log("tray right click → menu");
+                                macos_popup_tray_menu(tray, &tray_menu_right);
+                            }
+                            // Windows/Linux: tray-icon shows the menu when attached.
+                        }
+                        // Windows: double-click pairs with Click Down — guard debounce handles it.
+                        TrayIconEvent::DoubleClick {
                             button: MouseButton::Left,
                             ..
                         } => {
-                            debug_log("tray left click → reveal");
-                            tray_reveal(tray.app_handle(), &state_tray, &menus_tray);
+                            debug_log("tray double-click → toggle");
+                            toggle_visibility(tray.app_handle(), &state_tray, &menus_tray);
                         }
                         _ => {}
                     }
                 })
                 .build(app)?;
+            #[cfg(target_os = "macos")]
+            {
+                macos_detach_tray_status_menu(&tray);
+                debug_log("macOS tray: status-item menu detached (left click = toggle)");
+            }
+            // Resources table retains a clone; keep this binding for clarity.
+            let _tray = tray;
 
             let on_menu_bar = on_menu.clone();
             app.on_menu_event(move |app, event| {
@@ -1288,6 +1389,8 @@ pub fn run() {
                 // on macOS (and without X11 on Linux). Create lazily via checked_new.
                 let mut mouse = MouseTracker::new();
                 let mut tick: u64 = 0;
+                let mut cached_layout: Option<DesktopLayout> = None;
+                let mut last_set_pose: Option<(i32, i32)> = None;
                 #[cfg(target_os = "linux")]
                 {
                     if is_linux_wayland() {
@@ -1353,7 +1456,11 @@ pub fn run() {
                     // Window APIs must stay outside the state lock. Holding the mutex
                     // while calling into AppKit/Win32 deadlocks when a UI command waits
                     // on the same lock (pin, settings, save).
-                    let layout = build_layout(&window);
+                    // Refresh monitor geometry ~every 2s — not every 16ms tick.
+                    if cached_layout.is_none() || tick % 120 == 1 {
+                        cached_layout = Some(build_layout(&window));
+                    }
+                    let layout = cached_layout.clone().unwrap_or_default();
                     let outer = match (window.outer_position(), window.outer_size()) {
                         (Ok(pos), Ok(size)) => Some((pos, size)),
                         _ => None,
@@ -1372,7 +1479,8 @@ pub fn run() {
                         sample.x_phys *= scale;
                         sample.y_phys *= scale;
                     }
-                    if tick % 60 == 1 {
+                    // Sample ~every 5s, and only when SHY_NOTES_DEBUG is set (see debug_log).
+                    if tick % 300 == 1 {
                         if let Some((pos, size)) = &outer {
                             debug_log(format!(
                                 "mouse=({:.0},{:.0}) win=({},{};{}x{}) ctrl={ctrl} block={block_repulsion}",
@@ -1401,7 +1509,7 @@ pub fn run() {
                         let show_glow = inner.snapshot.prefs.show_glow;
                         (inner.controller.on_mouse(sample), show_glow)
                     };
-                    apply_commands(&window, &loop_handle, &cmds, show_glow);
+                    apply_commands(&window, &loop_handle, &cmds, show_glow, &mut last_set_pose);
                 }
             });
 
@@ -1410,11 +1518,25 @@ pub fn run() {
         .build(tauri::generate_context!())
         .expect("error while building shy-notes")
         .run(|app_handle, event| {
-            if let RunEvent::ExitRequested { .. } | RunEvent::Exit = event {
-                if let Some(state) = app_handle.try_state::<SharedState>() {
-                    let mut inner = state.lock();
-                    persist_from_controller_blocking(&mut inner);
+            match event {
+                RunEvent::ExitRequested { .. } | RunEvent::Exit => {
+                    if let Some(state) = app_handle.try_state::<SharedState>() {
+                        let mut inner = state.lock();
+                        persist_from_controller_blocking(&mut inner);
+                    }
                 }
+                // Dock icon click while running (window may be hidden to tray).
+                #[cfg(target_os = "macos")]
+                RunEvent::Reopen { .. } => {
+                    if let (Some(state), Some(menus)) = (
+                        app_handle.try_state::<SharedState>(),
+                        app_handle.try_state::<MenuHandle>(),
+                    ) {
+                        debug_log("macOS Dock reopen → reveal");
+                        tray_reveal(app_handle, &state, &menus);
+                    }
+                }
+                _ => {}
             }
         });
 }

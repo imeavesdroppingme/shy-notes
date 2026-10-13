@@ -33,7 +33,7 @@ pnpm install
 pnpm tauri dev
 ```
 
-Debug logging (pin, tray, visibility):
+Debug logging (stderr + `~/Library/Application Support/com.imeavesdropping.shy-notes/shy-notes.log` on macOS). Off by default — leaving it on used to grow the log forever from the mouse loop:
 
 ```bash
 SHY_NOTES_DEBUG=1 pnpm tauri dev
