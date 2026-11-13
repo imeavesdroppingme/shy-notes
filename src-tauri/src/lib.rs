@@ -3,7 +3,8 @@ mod permissions;
 mod persist;
 
 use interaction_core::{
-    DesktopLayout, InteractionCommand, InteractionController, MonitorInfo, WidgetPose,
+    capture_center, DesktopLayout, InteractionCommand, InteractionController, MonitorInfo,
+    WidgetPose,
 };
 use mouse::MouseTracker;
 use parking_lot::Mutex;
@@ -1390,7 +1391,30 @@ pub fn run() {
                 let mut mouse = MouseTracker::new();
                 let mut tick: u64 = 0;
                 let mut cached_layout: Option<DesktopLayout> = None;
+                let mut last_layout_at = std::time::Instant::now()
+                    .checked_sub(Duration::from_secs(10))
+                    .unwrap_or_else(std::time::Instant::now);
                 let mut last_set_pose: Option<(i32, i32)> = None;
+                // Cached window outer bounds — Win32/AppKit queries are costly at 60Hz.
+                let mut cached_outer: Option<(i32, i32, u32, u32)> = None;
+                let mut last_outer_at = std::time::Instant::now()
+                    .checked_sub(Duration::from_secs(10))
+                    .unwrap_or_else(std::time::Instant::now);
+                let mut cached_block = false;
+                let mut last_block_at = std::time::Instant::now()
+                    .checked_sub(Duration::from_secs(10))
+                    .unwrap_or_else(std::time::Instant::now);
+                let mut last_mouse_xy: Option<(f64, f64)> = None;
+                let mut last_debug_at = std::time::Instant::now()
+                    .checked_sub(Duration::from_secs(10))
+                    .unwrap_or_else(std::time::Instant::now);
+                // Adaptive poll: 60Hz near the note, ~10Hz when far / pinned idle,
+                // slower while concealed or waiting on permissions.
+                let mut sleep_ms: u64 = 16;
+                const ACTIVE_MS: u64 = 16;
+                const IDLE_MS: u64 = 100;
+                const HIDDEN_MS: u64 = 250;
+                const WAIT_MS: u64 = 500;
                 #[cfg(target_os = "linux")]
                 {
                     if is_linux_wayland() {
@@ -1402,9 +1426,10 @@ pub fn run() {
                     }
                 }
                 loop {
-                    std::thread::sleep(Duration::from_millis(16));
+                    std::thread::sleep(Duration::from_millis(sleep_ms));
                     tick = tick.wrapping_add(1);
                     let Some(window) = loop_handle.get_webview_window("main") else {
+                        sleep_ms = WAIT_MS;
                         continue;
                     };
 
@@ -1425,6 +1450,7 @@ pub fn run() {
                                     status.executable
                                 ));
                             }
+                            sleep_ms = WAIT_MS;
                             continue;
                         }
                     }
@@ -1447,27 +1473,30 @@ pub fn run() {
                             }
                         }
                         #[cfg(target_os = "linux")]
-                        if tick % 120 == 1 {
+                        if tick % 8 == 1 {
                             debug_log("mouse backend unavailable (no X display?)");
                         }
+                        sleep_ms = WAIT_MS;
                         continue;
                     }
 
-                    // Window APIs must stay outside the state lock. Holding the mutex
-                    // while calling into AppKit/Win32 deadlocks when a UI command waits
-                    // on the same lock (pin, settings, save).
-                    // Refresh monitor geometry ~every 2s — not every 16ms tick.
-                    if cached_layout.is_none() || tick % 120 == 1 {
-                        cached_layout = Some(build_layout(&window));
-                    }
-                    let layout = cached_layout.clone().unwrap_or_default();
-                    let outer = match (window.outer_position(), window.outer_size()) {
-                        (Ok(pos), Ok(size)) => Some((pos, size)),
-                        _ => None,
+                    // Cheap pose / visibility snapshot — no window APIs under the lock.
+                    let (concealed, cx, cy, influence_outer) = {
+                        let inner = loop_state.lock();
+                        let (cx, cy) = capture_center(&inner.controller.pose);
+                        let influence_outer = inner.controller.params.influence_radius
+                            + inner.controller.pose.w.max(inner.controller.pose.h) * 0.5;
+                        (inner.main_concealed, cx, cy, influence_outer)
                     };
-                    let block_repulsion = overlay_blocks_repulsion(&loop_handle);
-                    let ctrl = mouse.ctrl_held();
+
+                    if concealed {
+                        // Hidden to tray: nothing to flee from.
+                        sleep_ms = HIDDEN_MS;
+                        continue;
+                    }
+
                     let Some(mut sample) = mouse.sample() else {
+                        sleep_ms = WAIT_MS;
                         continue;
                     };
                     // device_query on macOS is in points; core uses physical pixels.
@@ -1479,30 +1508,82 @@ pub fn run() {
                         sample.x_phys *= scale;
                         sample.y_phys *= scale;
                     }
-                    // Sample ~every 5s, and only when SHY_NOTES_DEBUG is set (see debug_log).
-                    if tick % 300 == 1 {
-                        if let Some((pos, size)) = &outer {
+
+                    let dist = (sample.x_phys - cx).hypot(sample.y_phys - cy);
+                    // Slack so we ramp up before the influence edge.
+                    let near = dist <= influence_outer + 80.0;
+                    let mouse_moved = match last_mouse_xy {
+                        Some((x, y)) => {
+                            (sample.x_phys - x).abs() > 1.0 || (sample.y_phys - y).abs() > 1.0
+                        }
+                        None => true,
+                    };
+                    last_mouse_xy = Some((sample.x_phys, sample.y_phys));
+
+                    if !near && !mouse_moved {
+                        sleep_ms = IDLE_MS;
+                        continue;
+                    }
+
+                    sleep_ms = if near { ACTIVE_MS } else { IDLE_MS };
+
+                    // Window APIs must stay outside the state lock. Holding the mutex
+                    // while calling into AppKit/Win32 deadlocks when a UI command waits
+                    // on the same lock (pin, settings, save).
+                    if cached_layout.is_none() || last_layout_at.elapsed() >= Duration::from_secs(2)
+                    {
+                        cached_layout = Some(build_layout(&window));
+                        last_layout_at = std::time::Instant::now();
+                    }
+                    let layout = cached_layout.clone().unwrap_or_default();
+
+                    // Refresh outer bounds when near (flee/sync), after we moved the
+                    // window, or periodically while idle.
+                    let outer_ttl = if near {
+                        Duration::from_millis(50)
+                    } else {
+                        Duration::from_millis(500)
+                    };
+                    if cached_outer.is_none() || last_outer_at.elapsed() >= outer_ttl {
+                        cached_outer = match (window.outer_position(), window.outer_size()) {
+                            (Ok(pos), Ok(size)) => {
+                                Some((pos.x, pos.y, size.width, size.height))
+                            }
+                            _ => None,
+                        };
+                        last_outer_at = std::time::Instant::now();
+                    }
+                    let outer = cached_outer;
+
+                    let block_ttl = if near {
+                        Duration::from_millis(100)
+                    } else {
+                        Duration::from_millis(500)
+                    };
+                    if last_block_at.elapsed() >= block_ttl {
+                        cached_block = overlay_blocks_repulsion(&loop_handle);
+                        last_block_at = std::time::Instant::now();
+                    }
+                    let block_repulsion = cached_block;
+
+                    // Ctrl only matters while repulsion could run (near the note).
+                    let ctrl = if near { mouse.ctrl_held() } else { false };
+
+                    if last_debug_at.elapsed() >= Duration::from_secs(5) {
+                        last_debug_at = std::time::Instant::now();
+                        if let Some((x, y, w, h)) = outer {
                             debug_log(format!(
-                                "mouse=({:.0},{:.0}) win=({},{};{}x{}) ctrl={ctrl} block={block_repulsion}",
-                                sample.x_phys,
-                                sample.y_phys,
-                                pos.x,
-                                pos.y,
-                                size.width,
-                                size.height
+                                "mouse=({:.0},{:.0}) win=({x},{y};{w}x{h}) ctrl={ctrl} block={block_repulsion} near={near} sleep={sleep_ms}ms",
+                                sample.x_phys, sample.y_phys,
                             ));
                         }
                     }
+
                     let (cmds, show_glow) = {
                         let mut inner = loop_state.lock();
                         inner.controller.set_layout(layout);
-                        if let Some((pos, size)) = outer {
-                            inner.controller.sync_outer_pose(
-                                pos.x as f64,
-                                pos.y as f64,
-                                size.width as f64,
-                                size.height as f64,
-                            );
+                        if let Some((x, y, w, h)) = outer {
+                            inner.controller.sync_outer_pose(x as f64, y as f64, w as f64, h as f64);
                         }
                         inner.controller.suppress_repulsion =
                             ctrl || block_repulsion || inner.drop_hover;
@@ -1510,6 +1591,20 @@ pub fn run() {
                         (inner.controller.on_mouse(sample), show_glow)
                     };
                     apply_commands(&window, &loop_handle, &cmds, show_glow, &mut last_set_pose);
+                    // If we moved the window, invalidate outer cache so the next
+                    // near tick syncs the real bounds.
+                    if last_set_pose.is_some()
+                        && cmds.iter().any(|c| {
+                            matches!(c, InteractionCommand::SetPose { .. })
+                        })
+                    {
+                        if let Some((x, y)) = last_set_pose {
+                            if let Some((_, _, w, h)) = cached_outer {
+                                cached_outer = Some((x, y, w, h));
+                                last_outer_at = std::time::Instant::now();
+                            }
+                        }
+                    }
                 }
             });
 
